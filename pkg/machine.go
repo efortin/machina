@@ -12,11 +12,30 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type Machine struct {
 	Name         string
 	Distribution *UbuntuDistribution
+}
+
+func (m *Machine) outputFilePath() string {
+	return fmt.Sprintf("%s/%s", m.BaseDirectory(), "output")
+}
+
+func (m *Machine) Output() *os.File {
+	outputFile, _ := os.Create(m.outputFilePath())
+	return outputFile
+}
+
+func (m *Machine) inputFilePath() string {
+	return fmt.Sprintf("%s/%s", m.BaseDirectory(), "input")
+}
+
+func (m *Machine) Input() *os.File {
+	inputFile, _ := os.Create(m.inputFilePath())
+	return inputFile
 }
 
 func (m *Machine) BaseDirectory() string {
@@ -52,6 +71,7 @@ func (m *Machine) KernelDirectory() (path string) {
 func (m *Machine) RootDirectory() (path string) {
 	path = fmt.Sprintf("%s/%s", m.BaseDirectory(), "root.img")
 	err := m.Distribution.copyFileIfNotExist(m.Distribution.ImagePath(), path)
+	os.Truncate(path, 8*1024*1024*1024)
 	if err != nil {
 		klog.Exit(err)
 	}
@@ -59,24 +79,6 @@ func (m *Machine) RootDirectory() (path string) {
 }
 
 func (m *Machine) Launch() {
-	file, err := os.Create("./log.log")
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
-
-	klog.Infoln("Working")
-
-	klog.Infoln(m.BaseDirectory)
-
-	err = m.Distribution.DownloadDistro()
-	if err != nil {
-		klog.Fatal(err)
-	}
-
-	if err != nil {
-		klog.Error(err)
-	}
 
 	kernelCommandLineArguments := []string{"console=hvc0", "root=/dev/vda"}
 
@@ -100,7 +102,7 @@ func (m *Machine) Launch() {
 	fmt.Println(m.RootDirectory())
 	setRawMode(os.Stdin)
 
-	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(os.Stdin, os.Stdout)
+	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(m.Input(), m.Output())
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
 		consoleConfig,
@@ -183,6 +185,138 @@ func (m *Machine) Launch() {
 	}
 }
 
+func (m *Machine) LaunchPrimaryBoot() {
+
+	err := m.Distribution.DownloadDistro()
+	if err != nil {
+		klog.Fatal(err)
+	}
+
+	if err != nil {
+		klog.Error(err)
+	}
+
+	kernelCommandLineArguments := []string{"console=hvc0"}
+
+	bootLoader := vz.NewLinuxBootLoader(
+		m.KernelDirectory(),
+		vz.WithCommandLine(strings.Join(kernelCommandLineArguments, " ")),
+		vz.WithInitrd(m.InitRdDirectory()),
+	)
+
+	log.Println("bootLoader:", bootLoader)
+
+	config := vz.NewVirtualMachineConfiguration(
+		bootLoader,
+		1,
+		2*1024*1024*1024,
+	)
+
+	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(m.Input(), m.Output())
+	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
+	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
+		consoleConfig,
+	})
+
+	// network
+	natAttachment := vz.NewNATNetworkDeviceAttachment()
+	networkConfig := vz.NewVirtioNetworkDeviceConfiguration(natAttachment)
+	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
+		networkConfig,
+	})
+	networkConfig.SetMacAddress(vz.NewRandomLocallyAdministeredMACAddress())
+
+	// entropy
+	entropyConfig := vz.NewVirtioEntropyDeviceConfiguration()
+	config.SetEntropyDevicesVirtualMachineConfiguration([]*vz.VirtioEntropyDeviceConfiguration{
+		entropyConfig,
+	})
+
+	diskImageAttachment, err := vz.NewDiskImageStorageDeviceAttachment(
+		m.RootDirectory(),
+		false,
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	storageDeviceConfig := vz.NewVirtioBlockDeviceConfiguration(diskImageAttachment)
+	config.SetStorageDevicesVirtualMachineConfiguration([]vz.StorageDeviceConfiguration{
+		storageDeviceConfig,
+	})
+
+	// traditional memory balloon device which allows for managing guest memory. (optional)
+	config.SetMemoryBalloonDevicesVirtualMachineConfiguration([]vz.MemoryBalloonDeviceConfiguration{
+		vz.NewVirtioTraditionalMemoryBalloonDeviceConfiguration(),
+	})
+
+	// socket device (optional)
+	config.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{
+		vz.NewVirtioSocketDeviceConfiguration(),
+	})
+	validated, err := config.Validate()
+	if !validated || err != nil {
+		log.Fatal("validation failed", err)
+	}
+
+	vm := vz.NewVirtualMachine(config)
+
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+
+	vm.Start(func(err error) {
+		if err != nil {
+			errCh <- err
+		}
+	})
+
+	for {
+		select {
+		case <-signalCh:
+			result, err := vm.RequestStop()
+			if err != nil {
+				log.Println("request stop error:", err)
+				return
+			}
+			log.Println("recieved signal", result)
+		case newState := <-vm.StateChangedNotify():
+			if newState == vz.VirtualMachineStateRunning {
+				log.Println("start VM is running")
+
+				homedir, _ := os.UserHomeDir()
+				sshkey, _ := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
+				fmt.Println(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
+				fmt.Println(string(sshkey))
+
+				input := m.Input()
+				defer input.Close()
+
+				time.Sleep(5 * time.Second)
+				input.WriteString("mkdir /mnt\n")
+				time.Sleep(time.Second)
+				input.WriteString("mount /dev/vda /mnt\r")
+				time.Sleep(time.Second)
+				input.WriteString("cat << EOF > /mnt/etc/cloud/cloud.cfg.d/99_user.cfg\r")
+				input.WriteString(fmt.Sprintf(cloudinit, sshkey))
+				input.WriteString("\rEOF\r")
+				time.Sleep(time.Second)
+				input.WriteString("sync\n")
+				input.WriteString("poweroff\n")
+				time.Sleep(time.Second)
+
+			}
+			if newState == vz.VirtualMachineStateStopped {
+				log.Println("stopped successfully")
+				return
+			}
+		case err := <-errCh:
+			log.Println("in start:", err)
+		}
+	}
+}
+
 func setRawMode(f *os.File) {
 	var attr unix.Termios
 
@@ -203,3 +337,20 @@ func setRawMode(f *os.File) {
 	// reflects the changed settings
 	termios.Tcsetattr(f.Fd(), termios.TCSANOW, &attr)
 }
+
+const cloudinit = `
+#cloud-config
+disable_root: 0
+
+users:
+  - name: root
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    lock_passwd: false
+    hashed_passwd: $1$SaltSalt$YhgRYajLPrYevs14poKBQ0
+    ssh-authorized-keys: 
+      - %s
+runcmd:
+    - [ cp, /usr/bin/true, /usr/sbin/flash-kernel ]
+    - [ apt, remove, --purge, irqbalance, -y ]
+
+`
