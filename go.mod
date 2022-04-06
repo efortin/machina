@@ -9,6 +9,6 @@ require (
 	github.com/pkg/term v1.1.0
 	github.com/rs/xid v1.3.0 // indirect
 	github.com/stretchr/testify v1.6.1 // indirect
+	github.com/withmandala/go-log v0.1.0 // indirect
 	golang.org/x/sys v0.0.0-20211210111614-af8b64212486
-	k8s.io/klog/v2 v2.60.1
 )

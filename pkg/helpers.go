@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cavaliergopher/grab/v3"
+	"github.com/efortin/vz/utils"
 	"golang.org/x/sys/unix"
 	"io"
-	"k8s.io/klog/v2"
 	"log"
 	"os"
 	"os/exec"
@@ -53,7 +53,7 @@ func getWorkingDirectory() string {
 
 	vmctldir := Getenv("VMCTLDIR", user.HomeDir+"/.vm")
 	if _, err := os.Stat(vmctldir); errors.Is(err, os.ErrNotExist) {
-		klog.Warning("The .vm folder", vmctldir, " was created")
+		utils.Logger.Warn("The .vm folder", vmctldir, " was created")
 		if err := os.Mkdir(user.HomeDir+"/.vm", os.ModePerm); err != nil {
 			log.Fatal(err)
 		}
@@ -65,13 +65,12 @@ func (release *UbuntuDistribution) ImageDirectory() string {
 	return fmt.Sprintf("%s/%s", release.baseImageDirectory(), release.ReleaseName)
 }
 
-func (release *UbuntuDistribution) copyFileIfNotExist(srcFilePath string, dstFilePath string) (err error) {
+func (release *UbuntuDistribution) cloneIfNotExist(srcFilePath string, dstFilePath string) (err error) {
 	if _, err := os.Stat(dstFilePath); err == nil {
-		klog.Infof("Machine files %s exists, ignore copy", dstFilePath)
+		utils.Logger.Infof("Machine files %s exists, ignore copy", dstFilePath)
 		return err
 	}
 	err = unix.Clonefile(srcFilePath, dstFilePath, 0)
-
 	return
 }
 
@@ -102,7 +101,7 @@ func (release *UbuntuDistribution) baseImageDirectory() string {
 // write as it downloads and not load the whole file into memory.
 func (r *UbuntuDistribution) DownloadDistro() (err error) {
 	if err := os.Mkdir(r.ImageDirectory(), os.ModePerm); err != nil {
-		klog.Error(err)
+		utils.Logger.Error(err)
 	}
 
 	err = r.downloadInitRd()
@@ -131,7 +130,7 @@ func (release *UbuntuDistribution) ImagePath() string {
 func (release *UbuntuDistribution) downloadInitRd() (err error) {
 	_, err = os.Stat(release.InitRdPath())
 	if err == nil {
-		klog.Infof("InitRD %s at %s already exists", release.ReleaseName, release.InitRdPath())
+		utils.Logger.Infof("InitRD %s at %s already exists", release.ReleaseName, release.InitRdPath())
 		return
 	}
 	_, err = grab.Get(release.ImageDirectory(), fmt.Sprintf("https://cloud-images.ubuntu.com/%s/current/unpacked/%s-server-cloudimg-%s-initrd-generic", release.ReleaseName, release.ReleaseName, release.Architecture))
@@ -141,7 +140,7 @@ func (release *UbuntuDistribution) downloadInitRd() (err error) {
 func (release *UbuntuDistribution) downloadKernel() (err error) {
 	_, err = os.Stat(release.KernelPath())
 	if err == nil {
-		klog.Infof("Kernel %s at %s already exists", release.ReleaseName, release.KernelPath())
+		utils.Logger.Infof("Kernel %s at %s already exists", release.ReleaseName, release.KernelPath())
 		return
 	}
 	_, err = grab.Get(release.KernelPathGZIP(), fmt.Sprintf("https://cloud-images.ubuntu.com/%s/current/unpacked/%s-server-cloudimg-%s-vmlinuz-generic", release.ReleaseName, release.ReleaseName, release.Architecture))
@@ -183,14 +182,14 @@ func (release *UbuntuDistribution) downloadImage() (err error) {
 
 	_, err = os.Stat(release.ImagePath())
 	if err == nil {
-		klog.Infof("Image %s at %s already exists", release.ReleaseName, release.ImagePath())
+		utils.Logger.Infof("Image %s at %s already exists", release.ReleaseName, release.ImagePath())
 		return
 	}
 	_, err = grab.Get(release.ImageDirectory(), fmt.Sprintf("https://cloud-images.ubuntu.com/%s/current/%s-server-cloudimg-%s.tar.gz", release.ReleaseName, release.ReleaseName, release.Architecture))
 
 	cmd := exec.Command("/usr/bin/tar", "xf", release.ImageDirectory()+"/focal-server-cloudimg-arm64.tar.gz")
 	cmd.Dir = release.ImageDirectory() + "/"
-	klog.Infoln("cmd directory", cmd.Dir)
+	utils.Logger.Info("cmd directory", cmd.Dir)
 	err = cmd.Run()
 	cmd.Wait()
 

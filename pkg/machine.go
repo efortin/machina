@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Code-Hex/vz"
+	"github.com/efortin/vz/utils"
 	"github.com/pkg/term/termios"
 	"golang.org/x/sys/unix"
-	"k8s.io/klog/v2"
 	"log"
 	"net"
 	"os"
@@ -17,9 +17,20 @@ import (
 )
 import "C"
 
+const (
+	default_disk_size = 8 * 1024 * 1024 * 1024
+	default_mem_size  = 8 * 1024 * 1024 * 1024
+)
+
 type Machine struct {
 	Name         string
 	Distribution *UbuntuDistribution
+}
+
+// IpAddress Return VM ip address if already available
+// error if not found
+func (m *Machine) IpAddress() (string, error) {
+	return GetIPAddressByMACAddress(GenerateAlmostUniqueMac(m.Name))
 }
 
 func (m *Machine) outputFilePath() string {
@@ -38,9 +49,8 @@ func (m *Machine) inputFilePath() string {
 func (m *Machine) Input() *os.File {
 	file, err := os.Create(m.inputFilePath())
 	if err != nil {
-		klog.Exit("Cannot create input for for", m.Name, "at ", m.inputFilePath(), "with the following error", err.Error())
+		utils.Logger.Fatal("Cannot create input for for", m.Name, "at ", m.inputFilePath(), "with the following error", err.Error())
 	}
-
 	return file
 }
 
@@ -58,34 +68,39 @@ func (m *Machine) BaseDirectory() string {
 
 func (m *Machine) InitRdDirectory() (path string) {
 	path = fmt.Sprintf("%s/%s", m.BaseDirectory(), "initrd")
-	err := m.Distribution.copyFileIfNotExist(m.Distribution.InitRdPath(), path)
+	err := m.Distribution.cloneIfNotExist(m.Distribution.InitRdPath(), path)
 	if err != nil {
-		klog.Exit(err)
+		utils.Logger.Fatal(err)
 	}
 	return
 }
 
 func (m *Machine) KernelDirectory() (path string) {
 	path = fmt.Sprintf("%s/%s", m.BaseDirectory(), "vmlinuz")
-	err := m.Distribution.copyFileIfNotExist(m.Distribution.KernelPath(), path)
+	err := m.Distribution.cloneIfNotExist(m.Distribution.KernelPath(), path)
 	if err != nil {
-		klog.Exit(err)
+		utils.Logger.Fatal(err)
 	}
 	return
 }
 
-func (m *Machine) RootDirectory() (path string) {
+func (m *Machine) RootDirectory() (path string, err error) {
 	path = fmt.Sprintf("%s/%s", m.BaseDirectory(), "root.img")
-	err := m.Distribution.copyFileIfNotExist(m.Distribution.ImagePath(), path)
-	os.Truncate(path, 8*1024*1024*1024)
-	time.Sleep(5000)
+	err = m.Distribution.cloneIfNotExist(m.Distribution.ImagePath(), path)
 	if err != nil {
-		klog.Exit(err)
+		return
+	}
+	disk, err := os.Stat(path)
+
+	utils.Logger.Info("resizing disk", default_disk_size, disk.Size())
+	if default_disk_size > disk.Size() {
+		utils.Logger.Info("resizing disk", disk.Size(), "to", default_disk_size)
+		os.Truncate(path, default_disk_size)
 	}
 	return
 }
 
-func (m *Machine) Launch() (*vz.VirtualMachine, string) {
+func (m *Machine) Launch() (machine *vz.VirtualMachine, err error) {
 
 	kernelCommandLineArguments := []string{"console=hvc0", "root=/dev/vda"}
 
@@ -95,19 +110,13 @@ func (m *Machine) Launch() (*vz.VirtualMachine, string) {
 		vz.WithInitrd(m.InitRdDirectory()),
 	)
 
-	log.Println("bootLoader:", bootLoader)
-
 	config := vz.NewVirtualMachineConfiguration(
 		bootLoader,
 		1,
-		2*1024*1024*1024,
+		default_mem_size,
 	)
 
 	// console
-
-	//f, err := os.OpenFile("access.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	fmt.Println(m.RootDirectory())
-
 	input := m.Input()
 	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, m.Output())
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
@@ -133,8 +142,12 @@ func (m *Machine) Launch() (*vz.VirtualMachine, string) {
 		entropyConfig,
 	})
 
+	diskPath, err := m.RootDirectory()
+	if err != nil {
+		return
+	}
 	diskImageAttachment, err := vz.NewDiskImageStorageDeviceAttachment(
-		m.RootDirectory(),
+		diskPath,
 		false,
 	)
 
@@ -173,23 +186,20 @@ func (m *Machine) Launch() (*vz.VirtualMachine, string) {
 		}
 	})
 
-	return vm, mac.String()
+	return vm, err
 
 }
 
-func (m *Machine) LaunchPrimaryBoot() {
+func (m *Machine) LaunchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 
-	err := m.Distribution.DownloadDistro()
+	err = m.Distribution.DownloadDistro()
 	if err != nil {
-		klog.Fatal(err)
+		utils.Logger.Fatal(err)
 	}
 
 	if err != nil {
-		klog.Error(err)
+		utils.Logger.Error(err)
 	}
-
-	// TODO, fix Lazy issue at first boot
-	m.RootDirectory()
 
 	kernelCommandLineArguments := []string{"console=hvc0"}
 
@@ -231,8 +241,12 @@ func (m *Machine) LaunchPrimaryBoot() {
 		entropyConfig,
 	})
 
+	diskPath, err := m.RootDirectory()
+	if err != nil {
+		return
+	}
 	diskImageAttachment, err := vz.NewDiskImageStorageDeviceAttachment(
-		m.RootDirectory(),
+		diskPath,
 		false,
 	)
 
@@ -258,7 +272,7 @@ func (m *Machine) LaunchPrimaryBoot() {
 		log.Fatal("validation failed", err)
 	}
 
-	vm := vz.NewVirtualMachine(config)
+	vm = vz.NewVirtualMachine(config)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGTERM)
@@ -266,21 +280,21 @@ func (m *Machine) LaunchPrimaryBoot() {
 	errCh := make(chan error, 1)
 
 	vm.Start(func(err error) {
-		fmt.Println(err)
 		if err != nil {
 			errCh <- err
 		}
-		m.prepareFirstBoot(m.Input())
+		input := m.Input()
+		defer input.Close()
+		m.prepareFirstBoot(input)
 	})
-	fmt.Println(vm.CanPause())
-
+	return
 }
 
 func (m *Machine) prepareFirstBoot(input *os.File) {
 	homedir, _ := os.UserHomeDir()
 	sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
 	if err != nil {
-		klog.Exit("No default ssh key found at /.ssh/id_rsa.pub")
+		utils.Logger.Fatal("No default ssh key found at /.ssh/id_rsa.pub")
 	}
 	time.Sleep(5 * time.Second)
 	fmt.Println("writing")

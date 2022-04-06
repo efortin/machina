@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/efortin/vz/pkg"
+	"github.com/efortin/vz/utils"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
@@ -44,8 +45,10 @@ func serverMode() {
 		},
 	}
 	machine.LaunchPrimaryBoot()
-	_, mac := machine.Launch()
-	fmt.Println("////////////////////////////////////////////////////////The mac is " + mac)
+	_, _ = machine.Launch()
+	ip, _ := machine.IpAddress()
+
+	utils.Logger.Info("ip address is :", ip)
 
 	r.GET("/virtual-machine/launch", func(c *gin.Context) {
 		//go launch("test-1", "focal")
