@@ -43,7 +43,7 @@ func serverMode() {
 			Architecture: "arm64",
 		},
 	}
-	//machine.LaunchPrimaryBoot()
+	machine.LaunchPrimaryBoot()
 	_, mac := machine.Launch()
 	fmt.Println("////////////////////////////////////////////////////////The mac is " + mac)
 

@@ -8,6 +8,7 @@ import (
 	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -112,6 +113,11 @@ func (m *Machine) Launch() (*vz.VirtualMachine, string) {
 	// network
 	natAttachment := vz.NewNATNetworkDeviceAttachment()
 	networkConfig := vz.NewVirtioNetworkDeviceConfiguration(natAttachment)
+
+	mac, err := net.ParseMAC(GenerateAlmostUniqueMac(m.Name))
+	networkConfig.SetMacAddress(vz.NewMACAddress(mac))
+	//networkConfig.SetMacAddress(vz.NewRandomLocallyAdministeredMACAddress())
+
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 		networkConfig,
 	})
@@ -162,7 +168,7 @@ func (m *Machine) Launch() (*vz.VirtualMachine, string) {
 		}
 	})
 
-	return vm, GenerateAlmostUniqueMac("okok")
+	return vm, mac.String()
 
 }
 
@@ -203,7 +209,8 @@ func (m *Machine) LaunchPrimaryBoot() {
 	natAttachment := vz.NewNATNetworkDeviceAttachment()
 	networkConfig := vz.NewVirtioNetworkDeviceConfiguration(natAttachment)
 
-	networkConfig.SetMacAddress(vz.NewRandomLocallyAdministeredMACAddress())
+	mac, err := net.ParseMAC(GenerateAlmostUniqueMac(m.Name))
+	networkConfig.SetMacAddress(vz.NewMACAddress(mac))
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 		networkConfig,
 	})
@@ -268,12 +275,15 @@ func (m *Machine) LaunchPrimaryBoot() {
 				log.Println("start VM is running")
 
 				homedir, _ := os.UserHomeDir()
-				sshkey, _ := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
+				sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
+				if err != nil {
+					klog.Exit("No default ssh key found at /.ssh/id_rsa.pub")
+				}
+
 				fmt.Println(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
 				fmt.Println(string(sshkey))
 
 				input := m.Input()
-				defer input.Close()
 
 				time.Sleep(5 * time.Second)
 				input.WriteString("mkdir /mnt\n")
