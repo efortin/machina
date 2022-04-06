@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"time"
 )
 
 type UbuntuDistribution struct {
@@ -81,6 +82,7 @@ func (release *UbuntuDistribution) copyFileIfNotExist(srcFilePath string, dstFil
 	if err != nil {
 		klog.Error("Error creating", dstFilePath)
 	}
+	time.Sleep(2 * time.Second)
 	return
 }
 
@@ -202,7 +204,7 @@ func (release *UbuntuDistribution) downloadImage() (err error) {
 	cmd.Dir = release.ImageDirectory() + "/"
 	klog.Infoln("cmd directory", cmd.Dir)
 	err = cmd.Run()
-	fmt.Println(cmd.Stdout)
+	cmd.Wait()
 
 	return
 }

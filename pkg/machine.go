@@ -36,8 +36,12 @@ func (m *Machine) inputFilePath() string {
 }
 
 func (m *Machine) Input() *os.File {
-	inputFile, _ := os.Create(m.inputFilePath())
-	return inputFile
+	file, err := os.Create(m.inputFilePath())
+	if err != nil {
+		klog.Exit("Cannot create input for for", m.Name, "at ", m.inputFilePath(), "with the following error", err.Error())
+	}
+
+	return file
 }
 
 func (m *Machine) BaseDirectory() string {
@@ -74,6 +78,7 @@ func (m *Machine) RootDirectory() (path string) {
 	path = fmt.Sprintf("%s/%s", m.BaseDirectory(), "root.img")
 	err := m.Distribution.copyFileIfNotExist(m.Distribution.ImagePath(), path)
 	os.Truncate(path, 8*1024*1024*1024)
+	time.Sleep(5000)
 	if err != nil {
 		klog.Exit(err)
 	}
@@ -102,9 +107,9 @@ func (m *Machine) Launch() (*vz.VirtualMachine, string) {
 
 	//f, err := os.OpenFile("access.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	fmt.Println(m.RootDirectory())
-	setRawMode(os.Stdin)
 
-	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(m.Input(), m.Output())
+	input := m.Input()
+	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, m.Output())
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
 		consoleConfig,
@@ -183,6 +188,9 @@ func (m *Machine) LaunchPrimaryBoot() {
 		klog.Error(err)
 	}
 
+	// TODO, fix Lazy issue at first boot
+	m.RootDirectory()
+
 	kernelCommandLineArguments := []string{"console=hvc0"}
 
 	bootLoader := vz.NewLinuxBootLoader(
@@ -199,7 +207,9 @@ func (m *Machine) LaunchPrimaryBoot() {
 		2*1024*1024*1024,
 	)
 
-	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(m.Input(), m.Output())
+	input, _ := os.Create(m.inputFilePath())
+
+	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, m.Output())
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
 		consoleConfig,
@@ -256,57 +266,36 @@ func (m *Machine) LaunchPrimaryBoot() {
 	errCh := make(chan error, 1)
 
 	vm.Start(func(err error) {
+		fmt.Println(err)
 		if err != nil {
 			errCh <- err
 		}
+		m.prepareFirstBoot(m.Input())
 	})
+	fmt.Println(vm.CanPause())
 
-	for {
-		select {
-		case <-signalCh:
-			result, err := vm.RequestStop()
-			if err != nil {
-				log.Println("request stop error:", err)
-				return
-			}
-			log.Println("recieved signal", result)
-		case newState := <-vm.StateChangedNotify():
-			if newState == vz.VirtualMachineStateRunning {
-				log.Println("start VM is running")
+}
 
-				homedir, _ := os.UserHomeDir()
-				sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
-				if err != nil {
-					klog.Exit("No default ssh key found at /.ssh/id_rsa.pub")
-				}
-
-				fmt.Println(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
-				fmt.Println(string(sshkey))
-
-				input := m.Input()
-
-				time.Sleep(5 * time.Second)
-				input.WriteString("mkdir /mnt\n")
-				time.Sleep(time.Second)
-				input.WriteString("mount /dev/vda /mnt\r")
-				time.Sleep(time.Second)
-				input.WriteString("cat << EOF > /mnt/etc/cloud/cloud.cfg.d/99_user.cfg\r")
-				input.WriteString(fmt.Sprintf(cloudinit, sshkey))
-				input.WriteString("\rEOF\r")
-				time.Sleep(time.Second)
-				input.WriteString("sync\n")
-				input.WriteString("poweroff\n")
-				time.Sleep(time.Second)
-
-			}
-			if newState == vz.VirtualMachineStateStopped {
-				log.Println("stopped successfully")
-				return
-			}
-		case err := <-errCh:
-			log.Println("in start:", err)
-		}
+func (m *Machine) prepareFirstBoot(input *os.File) {
+	homedir, _ := os.UserHomeDir()
+	sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
+	if err != nil {
+		klog.Exit("No default ssh key found at /.ssh/id_rsa.pub")
 	}
+	time.Sleep(5 * time.Second)
+	fmt.Println("writing")
+	_, err = input.WriteString("mkdir /mnt\n")
+	time.Sleep(time.Second)
+	input.WriteString("mount /dev/vda /mnt\r")
+	time.Sleep(time.Second)
+	input.WriteString("cat << EOF > /mnt/etc/cloud/cloud.cfg.d/99_user.cfg\r")
+	input.WriteString(fmt.Sprintf(cloudinit, sshkey))
+	input.WriteString("\rEOF\r")
+	time.Sleep(time.Second)
+	input.WriteString("sync\n")
+	input.WriteString("poweroff\n")
+	time.Sleep(time.Second)
+
 }
 
 func setRawMode(f *os.File) {
