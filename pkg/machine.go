@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 )
+import "C"
 
 type Machine struct {
 	Name         string
@@ -78,7 +79,7 @@ func (m *Machine) RootDirectory() (path string) {
 	return
 }
 
-func (m *Machine) Launch() {
+func (m *Machine) Launch() (*vz.VirtualMachine, string) {
 
 	kernelCommandLineArguments := []string{"console=hvc0", "root=/dev/vda"}
 
@@ -114,7 +115,6 @@ func (m *Machine) Launch() {
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 		networkConfig,
 	})
-	networkConfig.SetMacAddress(vz.NewRandomLocallyAdministeredMACAddress())
 
 	// entropy
 	entropyConfig := vz.NewVirtioEntropyDeviceConfiguration()
@@ -162,27 +162,8 @@ func (m *Machine) Launch() {
 		}
 	})
 
-	for {
-		select {
-		case <-signalCh:
-			result, err := vm.RequestStop()
-			if err != nil {
-				log.Println("request stop error:", err)
-				return
-			}
-			log.Println("recieved signal", result)
-		case newState := <-vm.StateChangedNotify():
-			if newState == vz.VirtualMachineStateRunning {
-				log.Println("start VM is running")
-			}
-			if newState == vz.VirtualMachineStateStopped {
-				log.Println("stopped successfully")
-				return
-			}
-		case err := <-errCh:
-			log.Println("in start:", err)
-		}
-	}
+	return vm, GenerateAlmostUniqueMac("okok")
+
 }
 
 func (m *Machine) LaunchPrimaryBoot() {
@@ -221,10 +202,11 @@ func (m *Machine) LaunchPrimaryBoot() {
 	// network
 	natAttachment := vz.NewNATNetworkDeviceAttachment()
 	networkConfig := vz.NewVirtioNetworkDeviceConfiguration(natAttachment)
+
+	networkConfig.SetMacAddress(vz.NewRandomLocallyAdministeredMACAddress())
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 		networkConfig,
 	})
-	networkConfig.SetMacAddress(vz.NewRandomLocallyAdministeredMACAddress())
 
 	// entropy
 	entropyConfig := vz.NewVirtioEntropyDeviceConfiguration()

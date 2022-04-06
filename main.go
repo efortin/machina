@@ -1,11 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"github.com/efortin/vz/pkg"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
-	"os/exec"
 )
 
 func main() {
@@ -29,17 +29,23 @@ func machineMode() {
 		},
 	}
 	machine.LaunchPrimaryBoot()
-	machine.Launch()
+	_, mac := machine.Launch()
+	fmt.Println("////////////////////////////////////////////////////////The mac is ", mac)
 }
 
 func serverMode() {
 	r := gin.Default()
 
-	cmd := exec.Command("/Users/manu/Projects/vz/virtualization", "machine")
-	err := cmd.Start()
-	println(cmd.Process.Pid)
-	println(err)
-	cmd.Wait()
+	machine := internal.Machine{
+		Name: "test-2",
+		Distribution: &internal.UbuntuDistribution{
+			ReleaseName:  "focal",
+			Architecture: "arm64",
+		},
+	}
+	//machine.LaunchPrimaryBoot()
+	_, mac := machine.Launch()
+	fmt.Println("////////////////////////////////////////////////////////The mac is " + mac)
 
 	r.GET("/virtual-machine/launch", func(c *gin.Context) {
 		//go launch("test-1", "focal")
