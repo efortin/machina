@@ -7,15 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cavaliergopher/grab/v3"
+	"golang.org/x/sys/unix"
 	"io"
-	"io/ioutil"
 	"k8s.io/klog/v2"
 	"log"
 	"os"
 	"os/exec"
 	"os/user"
 	"strings"
-	"time"
 )
 
 type UbuntuDistribution struct {
@@ -71,24 +70,13 @@ func (release *UbuntuDistribution) copyFileIfNotExist(srcFilePath string, dstFil
 		klog.Infof("Machine files %s exists, ignore copy", dstFilePath)
 		return err
 	}
+	err = unix.Clonefile(srcFilePath, dstFilePath, 0)
 
-	input, err := ioutil.ReadFile(srcFilePath)
-	if err != nil {
-		klog.Error(err)
-		return
-	}
-
-	err = ioutil.WriteFile(dstFilePath, input, 0777)
-	if err != nil {
-		klog.Error("Error creating", dstFilePath)
-	}
-	time.Sleep(2 * time.Second)
 	return
 }
 
 func (release *UbuntuDistribution) baseMachineDirectory() string {
 	baseMachineDirectory := fmt.Sprintf("%s/machines", getWorkingDirectory())
-
 	if _, err := os.Stat(baseMachineDirectory); errors.Is(err, os.ErrNotExist) {
 		log.Default().Println("The root machine directory was not found, creating it...")
 		if err := os.Mkdir(baseMachineDirectory, os.ModePerm); err != nil {
