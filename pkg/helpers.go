@@ -71,7 +71,7 @@ func getWorkingDirectory() string {
 }
 
 func (release *UbuntuDistribution) ImageDirectory() string {
-	return fmt.Sprintf("%s/%s", release.baseImageDirectory(), release.ReleaseName)
+	return fmt.Sprintf("%s/%s", baseImageDirectory(), release.ReleaseName)
 }
 
 func (release *UbuntuDistribution) cloneIfNotExist(srcFilePath string, dstFilePath string) (err error) {
@@ -83,16 +83,28 @@ func (release *UbuntuDistribution) cloneIfNotExist(srcFilePath string, dstFilePa
 	return
 }
 
-func (release *UbuntuDistribution) baseMachineDirectory() string {
+func baseMachineDirectory() string {
 	baseMachineDirectory := fmt.Sprintf("%s/machines", getWorkingDirectory())
 	utils.DirectoryCreateIfAbsent(baseMachineDirectory)
 	return baseMachineDirectory
 }
 
-func (release *UbuntuDistribution) baseImageDirectory() string {
+func baseImageDirectory() string {
 	imageDirectory := fmt.Sprintf("%s/images", getWorkingDirectory())
 	utils.DirectoryCreateIfAbsent(imageDirectory)
 	return imageDirectory
+}
+
+func ListExistingMachines() []string {
+	files, err := os.ReadDir(baseMachineDirectory())
+	directoryNameStrings := make([]string, 0)
+	if err != nil {
+		return directoryNameStrings
+	}
+	for _, file := range files {
+		directoryNameStrings = append(directoryNameStrings, file.Name())
+	}
+	return directoryNameStrings
 }
 
 // DownloadDistro will download a url to a local file. It's efficient because it will

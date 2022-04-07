@@ -104,12 +104,12 @@ func (m *Machine) IpAddress() (string, error) {
 	return GetIPAddressByMACAddress(GenerateAlmostUniqueMac(m.Name))
 }
 
-func (m *Machine) outputFilePath() string {
+func (m *Machine) OutputFilePath() string {
 	return fmt.Sprintf("%s/%s", m.BaseDirectory(), "output")
 }
 
 func (m *Machine) Output() *os.File {
-	outputFile, _ := os.Create(m.outputFilePath())
+	outputFile, _ := os.Create(m.OutputFilePath())
 	return outputFile
 }
 
@@ -126,7 +126,7 @@ func (m *Machine) Input() *os.File {
 }
 
 func (m *Machine) BaseDirectory() string {
-	basedir := fmt.Sprintf("%s/%s", m.Distribution.baseMachineDirectory(), m.Name)
+	basedir := fmt.Sprintf("%s/%s", baseMachineDirectory(), m.Name)
 
 	if _, err := os.Stat(basedir); errors.Is(err, os.ErrNotExist) {
 		log.Default().Println("Machine directory not found, creating it...")
