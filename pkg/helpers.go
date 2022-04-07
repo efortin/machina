@@ -19,8 +19,8 @@ import (
 )
 
 type UbuntuDistribution struct {
-	ReleaseName  string
-	Architecture string
+	ReleaseName  string `json:"release"`
+	Architecture string `json:"arch"`
 }
 
 func FromEnvWithDefault(key, fallback string) string {

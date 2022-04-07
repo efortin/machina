@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Code-Hex/vz"
@@ -8,6 +9,7 @@ import (
 	"github.com/mitchellh/go-ps"
 	"github.com/pkg/term/termios"
 	"golang.org/x/sys/unix"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -23,23 +25,28 @@ const (
 	default_mem_size  = 2 * 1024 * 1024 * 1024
 	max_mem_size      = 8 * 1024 * 1024 * 1024
 	pidFileName       = "vmz.pid"
+	infoFileName      = "spec.json"
 
 	commandPrefix = "machina"
 )
 
 type MachineSpec struct {
-	Cpu uint
-	Ram uint64
+	Cpu uint   `json:"cpu"`
+	Ram uint64 `json:"memory"`
 }
 
 type Machine struct {
-	Name         string
-	Distribution *UbuntuDistribution
-	Spec         MachineSpec
+	Name         string              `json:"name"`
+	Distribution *UbuntuDistribution `json:"distribution"`
+	Spec         MachineSpec         `json:"specs"`
 }
 
 func (d *Machine) PidFilePath() string {
 	return fmt.Sprintf("%s/%s", d.BaseDirectory(), pidFileName)
+}
+
+func (d *Machine) InfoFilePath() string {
+	return fmt.Sprintf("%s/%s", d.BaseDirectory(), infoFileName)
 }
 
 /*
@@ -170,7 +177,27 @@ func (m *Machine) RootDirectory() (path string, err error) {
 	return
 }
 
-func (m *Machine) Launch() {
+func (m *Machine) exportMachineSpecification() {
+	specContent, _ := json.MarshalIndent(m, "", "\t")
+	_ = ioutil.WriteFile(m.InfoFilePath(), specContent, 0644)
+}
+
+func (m *Machine) hasAlreadyBeenConfigured() bool {
+	_, err := os.Stat(m.InfoFilePath())
+	return err == nil
+}
+
+func (m *Machine) Run() {
+	var err error
+	if !m.hasAlreadyBeenConfigured() {
+		_, err = m.launchPrimaryBoot()
+	}
+	if err == nil {
+		m.launch()
+	}
+}
+
+func (m *Machine) launch() {
 
 	kernelCommandLineArguments := []string{"console=hvc0", "root=/dev/vda"}
 
@@ -265,6 +292,7 @@ func (m *Machine) Launch() {
 			log.Println("recieved signal", result)
 		case newState := <-vm.StateChangedNotify():
 			if newState == vz.VirtualMachineStateRunning {
+				m.exportMachineSpecification()
 				log.Println("start VM is running")
 			}
 			if newState == vz.VirtualMachineStateStopped {
@@ -278,7 +306,7 @@ func (m *Machine) Launch() {
 
 }
 
-func (m *Machine) LaunchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
+func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 
 	err = m.Distribution.DownloadDistro()
 	if err != nil {

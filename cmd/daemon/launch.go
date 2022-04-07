@@ -2,7 +2,6 @@ package daemon
 
 import (
 	internal "github.com/efortin/machina/pkg"
-	"github.com/efortin/machina/utils"
 	"github.com/spf13/cobra"
 	"math"
 	"strconv"
@@ -53,10 +52,7 @@ or with shorthand:
 				Ram: uint64(math.Min(float64(ram)*GB, 16*GB)),
 			},
 		}
-		utils.Logger.Info("Spec are:", "cpu", machine.Spec.Cpu, ": ram", machine.Spec.Ram)
-		machine.LaunchPrimaryBoot()
-		machine.Launch()
-
+		machine.Run()
 	},
 }
 
