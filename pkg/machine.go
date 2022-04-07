@@ -23,7 +23,7 @@ const (
 	default_mem_size  = 2 * 1024 * 1024 * 1024
 	pidFileName       = "vmz.pid"
 
-	commandPrefix = "virtualization"
+	commandPrefix = "machina"
 )
 
 type Machine struct {
