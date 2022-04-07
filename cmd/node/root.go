@@ -2,11 +2,9 @@
 Copyright © 2022 NAME HERE <EMAIL ADDRESS>
 
 */
-package cmd
+package node
 
 import (
-	"github.com/efortin/machina/cmd/daemon"
-	"github.com/efortin/machina/cmd/node"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -14,7 +12,7 @@ import (
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
-	Use:   "machina",
+	Use:   "node",
 	Short: "A brief description of your application",
 	Long: `A longer description that spans multiple lines and likely contains
 examples and usage of using your application. For example:
@@ -41,8 +39,6 @@ func init() {
 
 	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.machina.yaml)")
 
-	RootCmd.AddCommand(node.RootCmd)
-	RootCmd.AddCommand(daemon.RootCmd)
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	RootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")

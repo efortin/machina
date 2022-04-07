@@ -21,14 +21,21 @@ import "C"
 const (
 	default_disk_size = 15 * 1024 * 1024 * 1024
 	default_mem_size  = 2 * 1024 * 1024 * 1024
+	max_mem_size      = 8 * 1024 * 1024 * 1024
 	pidFileName       = "vmz.pid"
 
 	commandPrefix = "machina"
 )
 
+type MachineSpec struct {
+	Cpu uint
+	Ram uint64
+}
+
 type Machine struct {
 	Name         string
 	Distribution *UbuntuDistribution
+	Spec         MachineSpec
 }
 
 func (d *Machine) PidFilePath() string {
@@ -175,8 +182,8 @@ func (m *Machine) Launch() {
 
 	config := vz.NewVirtualMachineConfiguration(
 		bootLoader,
-		4,
-		default_mem_size,
+		m.Spec.Cpu,
+		m.Spec.Ram,
 	)
 
 	// console
