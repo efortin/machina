@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"fmt"
 	internal "github.com/efortin/machina/pkg"
 	"github.com/efortin/machina/utils"
 	"github.com/spf13/cobra"
@@ -33,7 +32,6 @@ or with shorthand:
   machine launch -n ubuntu -m 2 -c 2
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Launch called")
 		cpus, err := strconv.Atoi(cmd.Flag("cpu").Value.String())
 		if err != nil {
 			cpus = default_cpu_number

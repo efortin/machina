@@ -42,7 +42,7 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
 		cwd, _ := os.Getwd()
 
 		//args := append(os.Args, "--detached")
-		mcmd := exec.Command("machina",
+		mcmd := exec.Command(os.Args[0],
 			"daemon", "launch",
 			"-n", cmd.Flag("name").Value.String(),
 			"-c", cmd.Flag("cpu").Value.String(),
