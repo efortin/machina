@@ -3,7 +3,7 @@ package internal
 import (
 	"bufio"
 	"fmt"
-	"github.com/efortin/vz/utils"
+	"github.com/efortin/machina/utils"
 	"io"
 	"os"
 	"regexp"

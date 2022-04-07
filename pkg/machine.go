@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Code-Hex/vz"
-	"github.com/efortin/vz/utils"
+	"github.com/efortin/machina/utils"
 	"github.com/mitchellh/go-ps"
 	"github.com/pkg/term/termios"
 	"golang.org/x/sys/unix"
@@ -19,7 +19,7 @@ import (
 import "C"
 
 const (
-	default_disk_size = 8 * 1024 * 1024 * 1024
+	default_disk_size = 15 * 1024 * 1024 * 1024
 	default_mem_size  = 2 * 1024 * 1024 * 1024
 	pidFileName       = "vmz.pid"
 
@@ -175,8 +175,8 @@ func (m *Machine) Launch() {
 
 	config := vz.NewVirtualMachineConfiguration(
 		bootLoader,
-		1,
-		2*1024*1024*1024,
+		4,
+		default_mem_size,
 	)
 
 	// console

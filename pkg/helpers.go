@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/cavaliergopher/grab/v3"
-	"github.com/efortin/vz/utils"
+	"github.com/efortin/machina/utils"
 	"golang.org/x/sys/unix"
 	"io"
 	"io/ioutil"

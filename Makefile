@@ -7,4 +7,4 @@ codesign:
 
 .PHONY: build
 build:
-	go build -o virtualization .
+	go build -a -ldflags '-extldflags "-static"' -v -o virtualization -i cmd/root.go
