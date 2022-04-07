@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/Code-Hex/vz"
 	"github.com/efortin/vz/utils"
+	"github.com/mitchellh/go-ps"
 	"github.com/pkg/term/termios"
 	"golang.org/x/sys/unix"
 	"log"
@@ -19,12 +20,75 @@ import "C"
 
 const (
 	default_disk_size = 8 * 1024 * 1024 * 1024
-	default_mem_size  = 8 * 1024 * 1024 * 1024
+	default_mem_size  = 2 * 1024 * 1024 * 1024
+	pidFileName       = "vmz.pid"
+
+	commandPrefix = "virtualization"
 )
 
 type Machine struct {
 	Name         string
 	Distribution *UbuntuDistribution
+}
+
+func (d *Machine) PidFilePath() string {
+	return fmt.Sprintf("%s/%s", d.BaseDirectory(), pidFileName)
+}
+
+/*
+* Returns a ps.Process instance if it could find a vfkit process with the pid
+* stored in $pidFileName
+*
+* Returns nil, nil if:
+* - if the $pidFileName file does not exist,
+* - if a process with the pid from this file cannot be found,
+* - if a process was found, but its name is not 'vfkit'
+ */
+func (d *Machine) FindVfkitProcess() (ps.Process, error) {
+	pidFile := d.PidFilePath()
+	pid, err := readPidFromFile(pidFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%v error reading pidfile %s", err, pidFile)
+	}
+
+	p, err := ps.FindProcess(pid)
+	if err != nil {
+		return nil, fmt.Errorf(fmt.Sprintf("%v cannot find pid %d", err, pid))
+	}
+	if p == nil {
+		utils.Logger.Debugf("vfkit pid %d missing from process table", pid)
+		// return PidNotExist error?
+		return nil, nil
+	}
+
+	if !strings.Contains(p.Executable(), commandPrefix) {
+		// return InvalidExecutable error?
+		utils.Logger.Debugf("pid %d is stale, and is being used by %s", pid, p.Executable())
+		return nil, nil
+	}
+
+	return p, nil
+}
+
+// Kill stops a host forcefully
+func (d *Machine) Kill() error {
+	return d.sendSignal(syscall.SIGKILL)
+}
+
+func (m *Machine) sendSignal(s os.Signal) error {
+	psProc, err := m.FindVfkitProcess()
+	if err != nil {
+		return err
+	}
+	proc, err := os.FindProcess(psProc.Pid())
+	if err != nil {
+		return err
+	}
+
+	return proc.Signal(s)
 }
 
 // IpAddress Return VM ip address if already available
@@ -92,15 +156,14 @@ func (m *Machine) RootDirectory() (path string, err error) {
 	}
 	disk, err := os.Stat(path)
 
-	utils.Logger.Info("resizing disk", default_disk_size, disk.Size())
 	if default_disk_size > disk.Size() {
-		utils.Logger.Info("resizing disk", disk.Size(), "to", default_disk_size)
+		utils.Logger.Info("Resizing disk", disk.Size(), "to", default_disk_size)
 		os.Truncate(path, default_disk_size)
 	}
 	return
 }
 
-func (m *Machine) Launch() (machine *vz.VirtualMachine, err error) {
+func (m *Machine) Launch() {
 
 	kernelCommandLineArguments := []string{"console=hvc0", "root=/dev/vda"}
 
@@ -113,11 +176,11 @@ func (m *Machine) Launch() (machine *vz.VirtualMachine, err error) {
 	config := vz.NewVirtualMachineConfiguration(
 		bootLoader,
 		1,
-		default_mem_size,
+		2*1024*1024*1024,
 	)
 
 	// console
-	input := m.Input()
+	input, _ := os.Create(m.inputFilePath())
 	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, m.Output())
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
@@ -130,8 +193,6 @@ func (m *Machine) Launch() (machine *vz.VirtualMachine, err error) {
 
 	mac, err := net.ParseMAC(GenerateAlmostUniqueMac(m.Name))
 	networkConfig.SetMacAddress(vz.NewMACAddress(mac))
-	//networkConfig.SetMacAddress(vz.NewRandomLocallyAdministeredMACAddress())
-
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 		networkConfig,
 	})
@@ -186,7 +247,27 @@ func (m *Machine) Launch() (machine *vz.VirtualMachine, err error) {
 		}
 	})
 
-	return vm, err
+	for {
+		select {
+		case <-signalCh:
+			result, err := vm.RequestStop()
+			if err != nil {
+				log.Println("request stop error:", err)
+				return
+			}
+			log.Println("recieved signal", result)
+		case newState := <-vm.StateChangedNotify():
+			if newState == vz.VirtualMachineStateRunning {
+				log.Println("start VM is running")
+			}
+			if newState == vz.VirtualMachineStateStopped {
+				log.Println("stopped successfully")
+				return
+			}
+		case err := <-errCh:
+			log.Println("in start:", err)
+		}
+	}
 
 }
 

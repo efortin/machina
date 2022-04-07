@@ -4,16 +4,17 @@ import (
 	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"github.com/cavaliergopher/grab/v3"
 	"github.com/efortin/vz/utils"
 	"golang.org/x/sys/unix"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"os/user"
+	"strconv"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ type UbuntuDistribution struct {
 	Architecture string
 }
 
-func Getenv(key, fallback string) string {
+func FromEnvWithDefault(key, fallback string) string {
 	value := os.Getenv(key)
 	if len(value) == 0 {
 		return fallback
@@ -44,20 +45,28 @@ func GetVirtualMachineDirectory(vmName string) string {
 	return fmt.Sprintf("%s/%s", getWorkingDirectory(), vmName)
 }
 
+func readPidFromFile(filename string) (int, error) {
+	bs, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return 0, err
+	}
+	content := strings.TrimSpace(string(bs))
+	pid, err := strconv.Atoi(content)
+	if err != nil {
+		return 0, fmt.Errorf("%v parsing %s", filename)
+	}
+
+	return pid, nil
+}
+
 func getWorkingDirectory() string {
 	user, err := user.Current()
 	if err != nil {
 		fmt.Errorf("%s", err)
 		os.Exit(1)
 	}
-
-	vmctldir := Getenv("VMCTLDIR", user.HomeDir+"/.vm")
-	if _, err := os.Stat(vmctldir); errors.Is(err, os.ErrNotExist) {
-		utils.Logger.Warn("The .vm folder", vmctldir, " was created")
-		if err := os.Mkdir(user.HomeDir+"/.vm", os.ModePerm); err != nil {
-			log.Fatal(err)
-		}
-	}
+	vmctldir := FromEnvWithDefault("VMCTLDIR", fmt.Sprint(user.HomeDir, "/.vm"))
+	utils.DirectoryCreateIfAbsent(vmctldir)
 	return vmctldir
 }
 
@@ -76,34 +85,20 @@ func (release *UbuntuDistribution) cloneIfNotExist(srcFilePath string, dstFilePa
 
 func (release *UbuntuDistribution) baseMachineDirectory() string {
 	baseMachineDirectory := fmt.Sprintf("%s/machines", getWorkingDirectory())
-	if _, err := os.Stat(baseMachineDirectory); errors.Is(err, os.ErrNotExist) {
-		log.Default().Println("The root machine directory was not found, creating it...")
-		if err := os.Mkdir(baseMachineDirectory, os.ModePerm); err != nil {
-			log.Fatal(err)
-		}
-	}
+	utils.DirectoryCreateIfAbsent(baseMachineDirectory)
 	return baseMachineDirectory
 }
 
 func (release *UbuntuDistribution) baseImageDirectory() string {
 	imageDirectory := fmt.Sprintf("%s/images", getWorkingDirectory())
-
-	if _, err := os.Stat(imageDirectory); errors.Is(err, os.ErrNotExist) {
-		log.Default().Println("Image directory not found, creating it...")
-		if err := os.Mkdir(imageDirectory, os.ModePerm); err != nil {
-			log.Fatal(err)
-		}
-	}
+	utils.DirectoryCreateIfAbsent(imageDirectory)
 	return imageDirectory
 }
 
 // DownloadDistro will download a url to a local file. It's efficient because it will
 // write as it downloads and not load the whole file into memory.
 func (r *UbuntuDistribution) DownloadDistro() (err error) {
-	if err := os.Mkdir(r.ImageDirectory(), os.ModePerm); err != nil {
-		utils.Logger.Error(err)
-	}
-
+	utils.DirectoryCreateIfAbsent(r.ImageDirectory())
 	err = r.downloadInitRd()
 	err = r.downloadKernel()
 	err = r.downloadImage()
@@ -182,7 +177,7 @@ func (release *UbuntuDistribution) downloadImage() (err error) {
 
 	_, err = os.Stat(release.ImagePath())
 	if err == nil {
-		utils.Logger.Infof("Image %s at %s already exists", release.ReleaseName, release.ImagePath())
+		utils.Logger.Debugf("Image %s at %s already exists", release.ReleaseName, release.ImagePath())
 		return
 	}
 	_, err = grab.Get(release.ImageDirectory(), fmt.Sprintf("https://cloud-images.ubuntu.com/%s/current/%s-server-cloudimg-%s.tar.gz", release.ReleaseName, release.ReleaseName, release.Architecture))

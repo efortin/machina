@@ -1,12 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"github.com/efortin/vz/pkg"
 	"github.com/efortin/vz/utils"
-	"github.com/gin-gonic/gin"
-	"net/http"
 	"os"
+	"os/exec"
+	"strconv"
 )
 
 func main() {
@@ -14,10 +13,23 @@ func main() {
 	argsWithoutProg := os.Args[1:]
 	if len(argsWithoutProg) > 0 && argsWithoutProg[0] == "machine" {
 		machineMode()
+	} else if len(argsWithoutProg) > 0 && argsWithoutProg[0] == "control" {
+		machineControl()
 	} else {
 		serverMode()
 	}
 
+}
+
+func machineControl() {
+	machine := internal.Machine{
+		Name: "test-2",
+		Distribution: &internal.UbuntuDistribution{
+			ReleaseName:  "focal",
+			Architecture: "arm64",
+		},
+	}
+	machine.Kill()
 }
 
 func machineMode() {
@@ -30,12 +42,16 @@ func machineMode() {
 		},
 	}
 	machine.LaunchPrimaryBoot()
-	_, mac := machine.Launch()
-	fmt.Println("////////////////////////////////////////////////////////The mac is ", mac)
+	machine.Launch()
+
 }
 
+const (
+	UID  = 501
+	GUID = 20
+)
+
 func serverMode() {
-	r := gin.Default()
 
 	machine := internal.Machine{
 		Name: "test-2",
@@ -44,16 +60,26 @@ func serverMode() {
 			Architecture: "arm64",
 		},
 	}
-	machine.LaunchPrimaryBoot()
-	_, _ = machine.Launch()
-	ip, _ := machine.IpAddress()
+	machine.Distribution.DownloadDistro()
+	machine.BaseDirectory()
 
-	utils.Logger.Info("ip address is :", ip)
+	ou, _ := os.Create(machine.BaseDirectory() + "/process.log")
+	er, _ := os.Create(machine.BaseDirectory() + "/process.log")
 
-	r.GET("/virtual-machine/launch", func(c *gin.Context) {
-		//go launch("test-1", "focal")
-		c.JSON(http.StatusOK, gin.H{"data": "VM is launched"})
-	})
+	cwd, _ := os.Getwd()
 
-	r.Run("127.0.0.1:8080")
+	//args := append(os.Args, "--detached")
+	cmd := exec.Command(os.Args[0], "machine")
+	cmd.Stderr = er
+	cmd.Stdin = nil
+	cmd.Stdout = ou
+	cmd.Dir = cwd
+	_ = cmd.Start()
+	pid := cmd.Process.Pid
+	utils.Logger.Info("the current process a pid", pid)
+	cmd.Process.Release()
+	_ = os.WriteFile(machine.PidFilePath(), []byte(strconv.Itoa(pid)), 0600)
+
+	//utils.Logger.Info("The machine", machine.Name, "has been successully created with the folowing ip:", ip)
+
 }

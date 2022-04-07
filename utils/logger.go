@@ -6,5 +6,5 @@ import (
 )
 
 var (
-	Logger = log.New(os.Stderr)
+	Logger = log.New(os.Stdout).WithDebug()
 )

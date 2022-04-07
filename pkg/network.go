@@ -35,26 +35,26 @@ func GetIPAddressByMACAddress(mac string) (string, error) {
 }
 
 func getIPAddressFromFile(mac, path string) (string, error) {
-	utils.Logger.Info("Searching for %s in %s ...", mac, path)
+	utils.Logger.Debugf("Searching for %s in %s ...", mac, path)
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return utils.Empty, err
 	}
 	defer file.Close()
 
 	dhcpEntries, err := parseDHCPdLeasesFile(file)
 	if err != nil {
-		return "", err
+		return utils.Empty, err
 	}
-	utils.Logger.Info("Found %d entries in %s!", len(dhcpEntries), path)
+	utils.Logger.Debugf("Found %d entries in %s!", len(dhcpEntries), path)
 	for _, dhcpEntry := range dhcpEntries {
-		utils.Logger.Info("dhcp entry: %+v", dhcpEntry)
+		utils.Logger.Tracef("dhcp entry: %+v", dhcpEntry)
 		if dhcpEntry.HWAddress == mac {
-			utils.Logger.Info("Found match: %s", mac)
+			utils.Logger.Tracef("Found match: %s", mac)
 			return dhcpEntry.IPAddress, nil
 		}
 	}
-	return "", fmt.Errorf("could not find an IP address for %s", mac)
+	return utils.Empty, fmt.Errorf("could not find an IP address for %s", mac)
 }
 
 func parseDHCPdLeasesFile(file io.Reader) ([]DHCPEntry, error) {
