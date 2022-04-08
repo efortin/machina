@@ -278,7 +278,7 @@ func (m *Machine) launch() {
 	vm := vz.NewVirtualMachine(config)
 
 	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGTERM)
+	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGKILL)
 
 	errCh := make(chan error, 1)
 
@@ -290,13 +290,17 @@ func (m *Machine) launch() {
 
 	for {
 		select {
-		case <-signalCh:
+		case sig := <-signalCh:
+			utils.Logger.Info("Receiving a termination signal", sig, "... Bye")
 			result, err := vm.RequestStop()
 			if err != nil {
-				utils.Logger.Info("request stop error:", err)
-				return
+				utils.Logger.Warn("The machine", m.Name, "was not stop properly: ", err)
+			} else if result {
+				utils.Logger.Warn("The machine", m.Name, "was not stopped")
+			} else {
+				utils.Logger.Info("The machine", m.Name, "was stopped")
 			}
-			utils.Logger.Info("recieved signal", result)
+			os.Remove(m.PidFilePath())
 		case newState := <-vm.StateChangedNotify():
 			switch newState {
 			case vz.VirtualMachineStateRunning:
