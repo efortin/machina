@@ -7,8 +7,6 @@ import (
 	"github.com/Code-Hex/vz"
 	"github.com/efortin/machina/utils"
 	"github.com/mitchellh/go-ps"
-	"github.com/pkg/term/termios"
-	"golang.org/x/sys/unix"
 	"io/ioutil"
 	"log"
 	"net"
@@ -435,27 +433,6 @@ func (m *Machine) prepareFirstBoot(input *os.File) {
 	input.WriteString("poweroff\n")
 	time.Sleep(time.Second)
 
-}
-
-func setRawMode(f *os.File) {
-	var attr unix.Termios
-
-	// Get settings for terminal
-	termios.Tcgetattr(f.Fd(), &attr)
-
-	// Put stdin into raw mode, disabling local echo, input canonicalization,
-	// and CR-NL mapping.
-	attr.Iflag &^= syscall.ICRNL
-	attr.Lflag &^= syscall.ICANON | syscall.ECHO
-
-	// Set minimum characters when reading = 1 char
-	attr.Cc[syscall.VMIN] = 1
-
-	// set timeout when reading as non-canonical mode
-	attr.Cc[syscall.VTIME] = 0
-
-	// reflects the changed settings
-	termios.Tcsetattr(f.Fd(), termios.TCSANOW, &attr)
 }
 
 const cloudinit = `

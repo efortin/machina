@@ -22,7 +22,7 @@ install: build-ci
 build:
 ifneq ($(BUILD_HASH), $(PREV_BUILD_HASH))
 	echo $(BUILD_HASH) > .fingerprint
-	GOARCH=${ARCH} GOOS=darwin go build -a -ldflags '-extldflags "-static"' -v -o build/${BINARY_NAME}-${ARCH} main.go
+	GOARCH=${ARCH} GOOS=darwin go build -a -ldflags '-s -w' -v -o build/${BINARY_NAME}-${ARCH} main.go
 else
 	@echo "Matches previous build hash, skipping"
 endif

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	internal "github.com/efortin/machina/pkg"
 	"github.com/efortin/machina/utils"
-	"github.com/jedib0t/go-pretty/table"
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"os"
 )
@@ -26,24 +26,19 @@ to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 
 		vmlist := internal.ListExistingMachines()
-		t := table.NewWriter()
-		t.SetOutputMirror(os.Stdout)
-		t.AppendHeader(table.Row{"name", "status", "ip", "release", "aarch", "cpu", "memory", "folder"})
+		t := tablewriter.NewWriter(os.Stdout)
+		t.SetHeader([]string{"name", "status", "ip", "release", "aarch", "cpu", "memory", "folder"})
 		for _, mname := range vmlist.List() {
 			machine, err := internal.FromFileSpec(mname)
 			if err == nil {
 				ip, _ := machine.IpAddress()
-				t.AppendRow(table.Row{
-					machine.Name, "created", ip, machine.Distribution.ReleaseName, machine.Distribution.Architecture, machine.Spec.Cpu, fmt.Sprint(machine.Spec.Ram/internal.GB, " GB"), machine.BaseDirectory(),
+				t.Append([]string{
+					machine.Name, "created", ip, machine.Distribution.ReleaseName, machine.Distribution.Architecture, string(machine.Spec.Cpu), fmt.Sprint(machine.Spec.Ram/internal.GB, " GB"), machine.BaseDirectory(),
 				})
 			} else {
-				t.AppendRow(table.Row{
-					mname, "error",
-				})
+				utils.NewSetFromSlice(mname, "error").List()
 			}
 		}
-		t.AppendFooter(table.Row{utils.Empty, utils.Empty, utils.Empty, utils.Empty, utils.Empty, utils.Empty, fmt.Sprint("Total: ", len(vmlist.List()))})
-		t.SetStyle(table.StyleColoredBlackOnGreenWhite)
 		t.Render()
 	},
 }
