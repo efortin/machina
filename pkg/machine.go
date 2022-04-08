@@ -293,21 +293,27 @@ func (m *Machine) launch() {
 		case <-signalCh:
 			result, err := vm.RequestStop()
 			if err != nil {
-				log.Println("request stop error:", err)
+				utils.Logger.Info("request stop error:", err)
 				return
 			}
-			log.Println("recieved signal", result)
+			utils.Logger.Info("recieved signal", result)
 		case newState := <-vm.StateChangedNotify():
-			if newState == vz.VirtualMachineStateRunning {
+			switch newState {
+			case vz.VirtualMachineStateRunning:
+				utils.Logger.Info("Machine", m.Name, "change status to running")
 				m.ExportMachineSpecification()
-				log.Println("start VM is running")
-			}
-			if newState == vz.VirtualMachineStateStopped {
-				log.Println("stopped successfully")
+			case vz.VirtualMachineStateStarting:
+				utils.Logger.Info("Machine", m.Name, "change status to starting on normal sequence")
+			case vz.VirtualMachineStateStopped:
+				utils.Logger.Info("Machine", m.Name, "change status to stopped")
 				return
+			default:
+				utils.Logger.Info("No action for the state", newState)
+
 			}
 		case err := <-errCh:
-			log.Println("in start:", err)
+			utils.Logger.Error("in start:", err)
+			return
 		}
 	}
 
@@ -406,21 +412,51 @@ func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 		if err != nil {
 			errCh <- err
 		}
-		input := m.Input()
-		defer input.Close()
-		m.prepareFirstBoot(input)
 	})
+
+	for {
+		select {
+		case <-signalCh:
+			result, err := vm.RequestStop()
+			if err != nil {
+				utils.Logger.Info("request stop error:", err)
+				return vm, err
+			}
+			utils.Logger.Info("recieved signal", result)
+		case newState := <-vm.StateChangedNotify():
+			switch newState {
+			case vz.VirtualMachineStateRunning:
+				utils.Logger.Info("Machine", m.Name, "change status to running, preparing first boot")
+				m.prepareFirstBoot()
+				m.ExportMachineSpecification()
+			case vz.VirtualMachineStateStarting:
+				utils.Logger.Info("Machine", m.Name, "change status to starting")
+			case vz.VirtualMachineStateStopped:
+				utils.Logger.Info("Machine", m.Name, "change status to stopped, will boot on normal sequence")
+				return
+			default:
+				utils.Logger.Info("No action for the state", newState)
+
+			}
+		case err := <-errCh:
+			utils.Logger.Error("in start:", err)
+			return vm, err
+		}
+	}
+
 	return
 }
 
-func (m *Machine) prepareFirstBoot(input *os.File) {
+func (m *Machine) prepareFirstBoot() {
+	input := m.Input()
+	defer input.Close()
+
 	homedir, _ := os.UserHomeDir()
 	sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
 	if err != nil {
 		utils.Logger.Fatal("No default ssh key found at /.ssh/id_rsa.pub")
 	}
 	time.Sleep(5 * time.Second)
-	fmt.Println("writing")
 	_, err = input.WriteString("mkdir /mnt\n")
 	time.Sleep(time.Second)
 	input.WriteString("mount /dev/vda /mnt\r")
@@ -431,8 +467,6 @@ func (m *Machine) prepareFirstBoot(input *os.File) {
 	time.Sleep(time.Second)
 	input.WriteString("sync\n")
 	input.WriteString("poweroff\n")
-	time.Sleep(time.Second)
-
 }
 
 const cloudinit = `

@@ -59,12 +59,11 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
 		machine.ExportMachineSpecification()
 
 		ou, _ := os.Create(machine.BaseDirectory() + "/process.log")
-		er, _ := os.Create(machine.BaseDirectory() + "/process_error.log")
 		cwd, _ := os.Getwd()
 
 		//args := append(os.Args, "--detached")
 		mcmd := exec.Command(os.Args[0], "daemon", "launch", "-n", machineName)
-		mcmd.Stderr = er
+		mcmd.Stderr = ou
 		mcmd.Stdin = nil
 		mcmd.Stdout = ou
 		mcmd.Dir = cwd
