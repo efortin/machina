@@ -1,9 +1,9 @@
 package node
 
 import (
-	"fmt"
 	internal "github.com/efortin/machina/pkg"
 	"github.com/efortin/machina/utils"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -27,34 +27,50 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
   machine Launch --name ubuntu --memory
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Launch called")
-		machine := internal.Machine{
+		machineName := cmd.Flag("name").Value.String()
+		if internal.ListExistingMachines().Contains(machineName) {
+			utils.Logger.Errorf("The machine %s already exist, please use `start` command...", machineName)
+			os.Exit(1)
+		}
+		cpus, err := strconv.Atoi(cmd.Flag("cpu").Value.String())
+		if err != nil {
+			cpus = internal.Default_cpu_number
+		}
+
+		ram, err := strconv.Atoi(cmd.Flag("memory").Value.String())
+		if err != nil {
+			ram = internal.Default_mem_mb
+		}
+
+		machine := &internal.Machine{
 			Name: cmd.Flag("name").Value.String(),
 			Distribution: &internal.UbuntuDistribution{
 				ReleaseName:  "focal",
 				Architecture: "arm64",
 			},
+			Spec: internal.MachineSpec{
+				Cpu: uint(math.Min(float64(cpus), 8.0)),
+				Ram: uint64(math.Min(float64(ram)*internal.GB, 16*internal.GB)),
+			},
 		}
+
 		machine.Distribution.DownloadDistro()
 		machine.BaseDirectory()
+		machine.ExportMachineSpecification()
 
 		ou, _ := os.Create(machine.BaseDirectory() + "/process.log")
+		er, _ := os.Create(machine.BaseDirectory() + "/process_error.log")
 		cwd, _ := os.Getwd()
 
 		//args := append(os.Args, "--detached")
-		mcmd := exec.Command(os.Args[0],
-			"daemon", "launch",
-			"-n", cmd.Flag("name").Value.String(),
-			"-c", cmd.Flag("cpu").Value.String(),
-			"-m", cmd.Flag("memory").Value.String(),
-		)
-		mcmd.Stderr = ou
+		mcmd := exec.Command(os.Args[0], "daemon", "launch", "-n", machineName)
+		mcmd.Stderr = er
 		mcmd.Stdin = nil
 		mcmd.Stdout = ou
 		mcmd.Dir = cwd
 		_ = mcmd.Start()
 		pid := mcmd.Process.Pid
-		utils.Logger.Info("the current process a pid", pid, mcmd.Args)
+		utils.Logger.Debug("the current process a pid: ", pid)
 		mcmd.Process.Release()
 		_ = os.WriteFile(machine.PidFilePath(), []byte(strconv.Itoa(pid)), 0600)
 

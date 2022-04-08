@@ -45,8 +45,12 @@ func (d *Machine) PidFilePath() string {
 	return fmt.Sprintf("%s/%s", d.BaseDirectory(), pidFileName)
 }
 
+func InfoFilePath(machineName string) string {
+	return fmt.Sprintf("%s/%s", MachineDirectory(machineName), infoFileName)
+}
+
 func (d *Machine) InfoFilePath() string {
-	return fmt.Sprintf("%s/%s", d.BaseDirectory(), infoFileName)
+	return InfoFilePath(d.Name)
 }
 
 /*
@@ -132,8 +136,12 @@ func (m *Machine) Input() *os.File {
 	return file
 }
 
+func MachineDirectory(machineName string) string {
+	return fmt.Sprintf("%s/%s", baseMachineDirectory(), machineName)
+}
+
 func (m *Machine) BaseDirectory() string {
-	basedir := fmt.Sprintf("%s/%s", baseMachineDirectory(), m.Name)
+	basedir := MachineDirectory(m.Name)
 
 	if _, err := os.Stat(basedir); errors.Is(err, os.ErrNotExist) {
 		log.Default().Println("Machine directory not found, creating it...")
@@ -177,14 +185,15 @@ func (m *Machine) RootDirectory() (path string, err error) {
 	return
 }
 
-func (m *Machine) exportMachineSpecification() {
+func (m *Machine) ExportMachineSpecification() {
 	specContent, _ := json.MarshalIndent(m, "", "\t")
 	_ = ioutil.WriteFile(m.InfoFilePath(), specContent, 0644)
 }
 
 func (m *Machine) hasAlreadyBeenConfigured() bool {
-	_, err := os.Stat(m.InfoFilePath())
-	return err == nil
+	// Find something else like check config or ip
+	//_, err := os.Stat(m.InfoFilePath())
+	return false
 }
 
 func (m *Machine) Run() {
@@ -292,7 +301,7 @@ func (m *Machine) launch() {
 			log.Println("recieved signal", result)
 		case newState := <-vm.StateChangedNotify():
 			if newState == vz.VirtualMachineStateRunning {
-				m.exportMachineSpecification()
+				m.ExportMachineSpecification()
 				log.Println("start VM is running")
 			}
 			if newState == vz.VirtualMachineStateStopped {

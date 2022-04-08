@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/cavaliergopher/grab/v3"
 	"github.com/efortin/machina/utils"
@@ -16,6 +17,12 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+)
+
+const (
+	Default_cpu_number = 2
+	Default_mem_mb     = 2 * GB
+	GB                 = 1024 * 1024 * 1024
 )
 
 type UbuntuDistribution struct {
@@ -95,16 +102,30 @@ func baseImageDirectory() string {
 	return imageDirectory
 }
 
-func ListExistingMachines() []string {
+func ListExistingMachines() *utils.Set {
 	files, err := os.ReadDir(baseMachineDirectory())
 	directoryNameStrings := make([]string, 0)
 	if err != nil {
-		return directoryNameStrings
+		return utils.NewSet()
 	}
 	for _, file := range files {
 		directoryNameStrings = append(directoryNameStrings, file.Name())
 	}
-	return directoryNameStrings
+	return utils.NewSetFromArray(directoryNameStrings)
+}
+
+func FromFileSpec(name string) (*Machine, error) {
+
+	specsFile, err := os.Open(InfoFilePath(name))
+	if err != nil {
+		return nil, fmt.Errorf("the machine %s doesn't not exist. will be created", name)
+	}
+
+	specsByteArray, _ := ioutil.ReadAll(specsFile)
+	var machine Machine
+	err = json.Unmarshal(specsByteArray, &machine)
+
+	return &machine, err
 }
 
 // DownloadDistro will download a url to a local file. It's efficient because it will

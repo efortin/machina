@@ -23,7 +23,7 @@ var logCmd = &cobra.Command{
 			fmt.Println(line.Text)
 		}
 	},
-	ValidArgs: internal.ListExistingMachines(),
+	ValidArgs: internal.ListExistingMachines().List(),
 	Args:      cobra.ExactValidArgs(1),
 }
 
