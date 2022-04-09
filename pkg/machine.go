@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,10 @@ const (
 	infoFileName      = "spec.json"
 
 	commandPrefix = "machina"
+
+	Machine_state_running = 0
+	Machine_state_stop    = 1
+	Machine_state_error   = 2
 )
 
 type MachineSpec struct {
@@ -60,51 +65,55 @@ func (d *Machine) InfoFilePath() string {
 * - if a process with the pid from this file cannot be found,
 * - if a process was found, but its name is not 'vfkit'
  */
-func (d *Machine) FindVfkitProcess() (ps.Process, error) {
+func (d *Machine) FindVfkitProcess() (ps.Process, int, error) {
 	pidFile := d.PidFilePath()
 	pid, err := readPidFromFile(pidFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			return nil, Machine_state_stop, nil
 		}
-		return nil, fmt.Errorf("%v error reading pidfile %s", err, pidFile)
+		return nil, Machine_state_stop, fmt.Errorf("%v error reading pidfile %s", err, pidFile)
 	}
 
 	p, err := ps.FindProcess(pid)
 	if err != nil {
-		return nil, fmt.Errorf(fmt.Sprintf("%v cannot find pid %d", err, pid))
+		return nil, Machine_state_error, fmt.Errorf(fmt.Sprintf("%v cannot find pid %d", err, pid))
 	}
 	if p == nil {
-		utils.Logger.Debugf("vfkit pid %d missing from process table", pid)
+		utils.Logger.Infof("vfkit pid %d missing from process table", pid)
 		// return PidNotExist error?
-		return nil, nil
+		return nil, Machine_state_error, nil
 	}
 
 	if !strings.Contains(p.Executable(), commandPrefix) {
 		// return InvalidExecutable error?
-		utils.Logger.Debugf("pid %d is stale, and is being used by %s", pid, p.Executable())
-		return nil, nil
+		utils.Logger.Infof("pid %d is stale, and is being used by %s", pid, p.Executable())
+		return nil, Machine_state_error, nil
 	}
 
-	return p, nil
+	return p, Machine_state_running, nil
 }
 
-// Kill stops a host forcefully
-func (d *Machine) Kill() error {
-	return d.sendSignal(syscall.SIGKILL)
+// Stop stops a host forcefully
+func (d *Machine) Stop() {
+	d.sendSignal(syscall.SIGTERM)
+
 }
 
 func (m *Machine) sendSignal(s os.Signal) error {
-	psProc, err := m.FindVfkitProcess()
-	if err != nil {
-		return err
+	psProc, machinestate, err := m.FindVfkitProcess()
+	if machinestate != Machine_state_running {
+		os.Remove(m.PidFilePath())
+		return nil
 	}
+	utils.Logger.Info("try to kill", psProc.Pid())
 	proc, err := os.FindProcess(psProc.Pid())
-	if err != nil {
-		return err
+	if err == nil {
+		return proc.Signal(s)
+	} else {
+		utils.Logger.Info("Error during kill", err)
 	}
-
-	return proc.Signal(s)
+	return nil
 }
 
 // IpAddress Return VM ip address if already available
@@ -196,12 +205,24 @@ func (m *Machine) hasAlreadyBeenConfigured() bool {
 
 func (m *Machine) Run() {
 	var err error
-	if !m.hasAlreadyBeenConfigured() {
-		_, err = m.launchPrimaryBoot()
+	switch m.State() {
+	case Machine_state_running:
+		utils.Logger.Info("Machine", m.Name, "has already been start by another process...")
+		os.Exit(1)
+	default:
+
+		if !m.hasAlreadyBeenConfigured() {
+			_, err = m.launchPrimaryBoot()
+		}
+		if err == nil {
+			m.launch()
+		}
 	}
-	if err == nil {
-		m.launch()
-	}
+}
+
+func (m *Machine) State() int {
+	_, state, _ := m.FindVfkitProcess()
+	return state
 }
 
 func (m *Machine) launch() {
@@ -285,6 +306,8 @@ func (m *Machine) launch() {
 	vm.Start(func(err error) {
 		if err != nil {
 			errCh <- err
+		} else {
+			_ = os.WriteFile(m.PidFilePath(), []byte(strconv.Itoa(os.Getpid())), 0600)
 		}
 	})
 
@@ -293,14 +316,16 @@ func (m *Machine) launch() {
 		case sig := <-signalCh:
 			utils.Logger.Info("Receiving a termination signal", sig, "... Bye")
 			result, err := vm.RequestStop()
+			vm.Release()
 			if err != nil {
 				utils.Logger.Warn("The machine", m.Name, "was not stop properly: ", err)
 			} else if result {
-				utils.Logger.Warn("The machine", m.Name, "was not stopped")
+				utils.Logger.Warn("The machine", m.Name, "was stopped successfully")
 			} else {
-				utils.Logger.Info("The machine", m.Name, "was stopped")
+				utils.Logger.Info("The machine", m.Name, "was not stopped")
 			}
 			os.Remove(m.PidFilePath())
+			os.Exit(0)
 		case newState := <-vm.StateChangedNotify():
 			switch newState {
 			case vz.VirtualMachineStateRunning:
@@ -346,8 +371,8 @@ func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 
 	config := vz.NewVirtualMachineConfiguration(
 		bootLoader,
-		1,
-		2*1024*1024*1024,
+		Default_cpu_number,
+		default_mem_size,
 	)
 
 	input, _ := os.Create(m.inputFilePath())
@@ -408,25 +433,29 @@ func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 	vm = vz.NewVirtualMachine(config)
 
 	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGTERM)
+	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGKILL)
 
 	errCh := make(chan error, 1)
 
 	vm.Start(func(err error) {
 		if err != nil {
 			errCh <- err
+		} else {
+			_ = os.WriteFile(m.PidFilePath(), []byte(strconv.Itoa(os.Getpid())), 0600)
 		}
 	})
 
 	for {
 		select {
-		case <-signalCh:
-			result, err := vm.RequestStop()
+		case signal := <-signalCh:
+			utils.Logger.Info("recieved signal", signal)
+			_, err = vm.RequestStop()
 			if err != nil {
-				utils.Logger.Info("request stop error:", err)
-				return vm, err
+				utils.Logger.Error("Machine", m.Name, " wasn't stopped")
+				utils.Logger.Debug(err)
+				return
 			}
-			utils.Logger.Info("recieved signal", result)
+			utils.Logger.Info("Machine", m.Name, " was successfully stopped")
 		case newState := <-vm.StateChangedNotify():
 			switch newState {
 			case vz.VirtualMachineStateRunning:

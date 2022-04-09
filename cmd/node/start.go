@@ -3,11 +3,9 @@ package node
 import (
 	internal "github.com/efortin/machina/pkg"
 	"github.com/efortin/machina/utils"
+	"github.com/spf13/cobra"
 	"os"
 	"os/exec"
-	"strconv"
-
-	"github.com/spf13/cobra"
 )
 
 // Launch represents the Launch command
@@ -36,11 +34,16 @@ start the machine named ubuntu and override cpu with 2 cpu and 2 go of ram:
 			os.Exit(1)
 		}
 
+		if machine.State() == internal.Machine_state_running {
+			utils.Logger.Warnf("the configure machine %s is already running", machineName)
+			os.Exit(1)
+		}
+
 		machine.Distribution.DownloadDistro()
 		machine.BaseDirectory()
 
 		ou, _ := os.Create(machine.BaseDirectory() + "/process.log")
-		er, _ := os.Create(machine.BaseDirectory() + "/process_error.log")
+		er, _ := os.Create(machine.BaseDirectory() + "/process.log")
 		cwd, _ := os.Getwd()
 
 		//args := append(os.Args, "--detached")
@@ -53,8 +56,6 @@ start the machine named ubuntu and override cpu with 2 cpu and 2 go of ram:
 		pid := mcmd.Process.Pid
 		utils.Logger.Debug("the current process a pid: ", pid)
 		mcmd.Process.Release()
-		_ = os.WriteFile(machine.PidFilePath(), []byte(strconv.Itoa(pid)), 0600)
-
 	},
 }
 
