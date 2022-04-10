@@ -11,6 +11,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"os"
+	"strconv"
 )
 
 // listCmd represents the list command
@@ -27,13 +28,13 @@ to quickly create a Cobra application.`,
 
 		vmlist := internal.ListExistingMachines()
 		t := tablewriter.NewWriter(os.Stdout)
-		t.SetHeader([]string{"name", "status", "ip", "release", "aarch", "cpu", "memory", "folder"})
+		t.SetHeader([]string{"name", "status", "ip", "release", "aarch", "cpu", "memory", "process", "folder"})
 		for _, mname := range vmlist.List() {
 			machine, err := internal.FromFileSpec(mname)
 			if err == nil {
 				ip, _ := machine.IpAddress()
 				t.Append([]string{
-					machine.Name, "created", ip, machine.Distribution.ReleaseName, machine.Distribution.Architecture, string(machine.Spec.Cpu), fmt.Sprint(machine.Spec.Ram/internal.GB, " GB"), machine.BaseDirectory(),
+					machine.Name, machine.State(), ip, machine.Distribution.ReleaseName, machine.Distribution.Architecture, strconv.Itoa(int(machine.Spec.Cpu)), fmt.Sprint(machine.Spec.Ram/internal.GB, " GB"), machine.PID(), machine.BaseDirectory(),
 				})
 			} else {
 				utils.NewSetFromSlice(mname, "error").List()

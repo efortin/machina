@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/Code-Hex/vz"
 	"github.com/efortin/machina/utils"
+	"github.com/hpcloud/tail"
 	"github.com/mitchellh/go-ps"
 	"io/ioutil"
 	"log"
@@ -28,9 +29,11 @@ const (
 
 	commandPrefix = "machina"
 
-	Machine_state_running = 0
-	Machine_state_stop    = 1
-	Machine_state_error   = 2
+	Machine_state_running = "running"
+	Machine_state_stop    = "stopped"
+	Machine_state_error   = "unknown"
+
+	TimeoutStart = 5 * time.Second
 )
 
 type MachineSpec struct {
@@ -48,12 +51,27 @@ func (d *Machine) PidFilePath() string {
 	return fmt.Sprintf("%s/%s", d.BaseDirectory(), pidFileName)
 }
 
+func (m Machine) Log() {
+	t, _ := tail.TailFile(m.OutputLogPath(), tail.Config{Follow: true})
+	for line := range t.Lines {
+		fmt.Println(line.Text)
+	}
+}
+
 func InfoFilePath(machineName string) string {
 	return fmt.Sprintf("%s/%s", MachineDirectory(machineName), infoFileName)
 }
 
 func (d *Machine) InfoFilePath() string {
 	return InfoFilePath(d.Name)
+}
+
+func (d *Machine) PID() string {
+	pid, _, _ := d.findVfkitProcess()
+	if pid == nil {
+		return utils.Empty
+	}
+	return strconv.Itoa(pid.Pid())
 }
 
 /*
@@ -65,7 +83,7 @@ func (d *Machine) InfoFilePath() string {
 * - if a process with the pid from this file cannot be found,
 * - if a process was found, but its name is not 'vfkit'
  */
-func (d *Machine) FindVfkitProcess() (ps.Process, int, error) {
+func (d *Machine) findVfkitProcess() (ps.Process, string, error) {
 	pidFile := d.PidFilePath()
 	pid, err := readPidFromFile(pidFile)
 	if err != nil {
@@ -97,13 +115,15 @@ func (d *Machine) FindVfkitProcess() (ps.Process, int, error) {
 // Stop stops a host forcefully
 func (d *Machine) Stop() {
 	d.sendSignal(syscall.SIGTERM)
+}
 
+func (m *Machine) cleanBeforeExit() {
+	os.Remove(m.PidFilePath())
 }
 
 func (m *Machine) sendSignal(s os.Signal) error {
-	psProc, machinestate, err := m.FindVfkitProcess()
+	psProc, machinestate, err := m.findVfkitProcess()
 	if machinestate != Machine_state_running {
-		os.Remove(m.PidFilePath())
 		return nil
 	}
 	utils.Logger.Info("try to kill", psProc.Pid())
@@ -122,25 +142,12 @@ func (m *Machine) IpAddress() (string, error) {
 	return GetIPAddressByMACAddress(GenerateAlmostUniqueMac(m.Name))
 }
 
-func (m *Machine) OutputFilePath() string {
-	return fmt.Sprintf("%s/%s", m.BaseDirectory(), "output")
+func (m *Machine) OutputLogPath() string {
+	return fmt.Sprintf("%s/%s-%s", TmpDirectory(), m.Name, "output")
 }
 
-func (m *Machine) Output() *os.File {
-	outputFile, _ := os.Create(m.OutputFilePath())
-	return outputFile
-}
-
-func (m *Machine) inputFilePath() string {
-	return fmt.Sprintf("%s/%s", m.BaseDirectory(), "input")
-}
-
-func (m *Machine) Input() *os.File {
-	file, err := os.Create(m.inputFilePath())
-	if err != nil {
-		utils.Logger.Fatal("Cannot create input for for", m.Name, "at ", m.inputFilePath(), "with the following error", err.Error())
-	}
-	return file
+func (m *Machine) inputLogPath() string {
+	return fmt.Sprintf("%s/%s-%s", TmpDirectory(), m.Name, "input")
 }
 
 func MachineDirectory(machineName string) string {
@@ -212,7 +219,7 @@ func (m *Machine) Run() {
 	default:
 
 		if !m.hasAlreadyBeenConfigured() {
-			_, err = m.launchPrimaryBoot()
+			m.launchPrimaryBoot()
 		}
 		if err == nil {
 			m.launch()
@@ -220,8 +227,8 @@ func (m *Machine) Run() {
 	}
 }
 
-func (m *Machine) State() int {
-	_, state, _ := m.FindVfkitProcess()
+func (m *Machine) State() string {
+	_, state, _ := m.findVfkitProcess()
 	return state
 }
 
@@ -242,8 +249,11 @@ func (m *Machine) launch() {
 	)
 
 	// console
-	input, _ := os.Create(m.inputFilePath())
-	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, m.Output())
+	serialPortAttachment, err := vz.NewFileSerialPortAttachment(m.OutputLogPath(), true)
+	if err != nil {
+		utils.Logger.Errorf("Error during serial port attachment (file: %s): %v", m.OutputLogPath(), err)
+		os.Exit(1)
+	}
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
 		consoleConfig,
@@ -254,7 +264,7 @@ func (m *Machine) launch() {
 	networkConfig := vz.NewVirtioNetworkDeviceConfiguration(natAttachment)
 
 	mac, err := net.ParseMAC(GenerateAlmostUniqueMac(m.Name))
-	networkConfig.SetMacAddress(vz.NewMACAddress(mac))
+	networkConfig.SetMACAddress(vz.NewMACAddress(mac))
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 		networkConfig,
 	})
@@ -287,7 +297,6 @@ func (m *Machine) launch() {
 		vz.NewVirtioTraditionalMemoryBalloonDeviceConfiguration(),
 	})
 
-	// socket device (optional)
 	config.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{
 		vz.NewVirtioSocketDeviceConfiguration(),
 	})
@@ -311,12 +320,23 @@ func (m *Machine) launch() {
 		}
 	})
 
+	err = m.waitForVMState(vm, vz.VirtualMachineStateRunning)
+	if err != nil {
+		utils.Logger.Error(err)
+		m.cleanBeforeExit()
+		os.Exit(1)
+	}
+	m.ExportMachineSpecification()
+	m.waitTermination(vm, signalCh)
+
+}
+
+func (m *Machine) waitTermination(vm *vz.VirtualMachine, signalCh chan os.Signal) {
 	for {
 		select {
 		case sig := <-signalCh:
 			utils.Logger.Info("Receiving a termination signal", sig, "... Bye")
 			result, err := vm.RequestStop()
-			vm.Release()
 			if err != nil {
 				utils.Logger.Warn("The machine", m.Name, "was not stop properly: ", err)
 			} else if result {
@@ -324,33 +344,16 @@ func (m *Machine) launch() {
 			} else {
 				utils.Logger.Info("The machine", m.Name, "was not stopped")
 			}
-			os.Remove(m.PidFilePath())
+			vm.Release()
+			m.cleanBeforeExit()
 			os.Exit(0)
-		case newState := <-vm.StateChangedNotify():
-			switch newState {
-			case vz.VirtualMachineStateRunning:
-				utils.Logger.Info("Machine", m.Name, "change status to running")
-				m.ExportMachineSpecification()
-			case vz.VirtualMachineStateStarting:
-				utils.Logger.Info("Machine", m.Name, "change status to starting on normal sequence")
-			case vz.VirtualMachineStateStopped:
-				utils.Logger.Info("Machine", m.Name, "change status to stopped")
-				return
-			default:
-				utils.Logger.Info("No action for the state", newState)
-
-			}
-		case err := <-errCh:
-			utils.Logger.Error("in start:", err)
-			return
 		}
 	}
-
 }
 
-func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
+func (m *Machine) launchPrimaryBoot() {
 
-	err = m.Distribution.DownloadDistro()
+	err := m.Distribution.DownloadDistro()
 	if err != nil {
 		utils.Logger.Fatal(err)
 	}
@@ -375,9 +378,20 @@ func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 		default_mem_size,
 	)
 
-	input, _ := os.Create(m.inputFilePath())
-
-	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, m.Output())
+	input, err := os.OpenFile(m.inputLogPath(), os.O_RDONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		utils.Logger.Error("Error during openning %s file: %v", m.inputLogPath(), err)
+		os.Exit(1)
+	}
+	defer input.Close()
+	output, err := os.OpenFile(m.OutputLogPath(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		utils.Logger.Error("Error during openning %s file: %v", output, err)
+		os.Exit(1)
+	}
+	defer input.Close()
+	defer output.Close()
+	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, output)
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
 		consoleConfig,
@@ -388,7 +402,7 @@ func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 	networkConfig := vz.NewVirtioNetworkDeviceConfiguration(natAttachment)
 
 	mac, err := net.ParseMAC(GenerateAlmostUniqueMac(m.Name))
-	networkConfig.SetMacAddress(vz.NewMACAddress(mac))
+	networkConfig.SetMACAddress(vz.NewMACAddress(mac))
 	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 		networkConfig,
 	})
@@ -421,16 +435,12 @@ func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 		vz.NewVirtioTraditionalMemoryBalloonDeviceConfiguration(),
 	})
 
-	// socket device (optional)
-	config.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{
-		vz.NewVirtioSocketDeviceConfiguration(),
-	})
 	validated, err := config.Validate()
 	if !validated || err != nil {
 		log.Fatal("validation failed", err)
 	}
 
-	vm = vz.NewVirtualMachine(config)
+	vm := vz.NewVirtualMachine(config)
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGKILL)
@@ -445,45 +455,24 @@ func (m *Machine) launchPrimaryBoot() (vm *vz.VirtualMachine, err error) {
 		}
 	})
 
-	for {
-		select {
-		case signal := <-signalCh:
-			utils.Logger.Info("recieved signal", signal)
-			_, err = vm.RequestStop()
-			if err != nil {
-				utils.Logger.Error("Machine", m.Name, " wasn't stopped")
-				utils.Logger.Debug(err)
-				return
-			}
-			utils.Logger.Info("Machine", m.Name, " was successfully stopped")
-		case newState := <-vm.StateChangedNotify():
-			switch newState {
-			case vz.VirtualMachineStateRunning:
-				utils.Logger.Info("Machine", m.Name, "change status to running, preparing first boot")
-				m.prepareFirstBoot()
-				m.ExportMachineSpecification()
-			case vz.VirtualMachineStateStarting:
-				utils.Logger.Info("Machine", m.Name, "change status to starting")
-			case vz.VirtualMachineStateStopped:
-				utils.Logger.Info("Machine", m.Name, "change status to stopped, will boot on normal sequence")
-				return
-			default:
-				utils.Logger.Info("No action for the state", newState)
+	err = m.waitForVMState(vm, vz.VirtualMachineStateRunning)
 
-			}
-		case err := <-errCh:
-			utils.Logger.Error("in start:", err)
-			return vm, err
-		}
+	if err != nil {
+		utils.Logger.Error(err)
+		os.Exit(1)
 	}
+	m.prepareFirstBoot()
+	m.ExportMachineSpecification()
+	vm.RequestStop()
+	err = m.waitForVMState(vm, vz.VirtualMachineStateStopped)
+	vm.Release()
+	input.Close()
 
-	return
 }
 
 func (m *Machine) prepareFirstBoot() {
-	input := m.Input()
+	input, err := os.OpenFile(m.inputLogPath(), os.O_WRONLY, 0666)
 	defer input.Close()
-
 	homedir, _ := os.UserHomeDir()
 	sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
 	if err != nil {
@@ -500,6 +489,20 @@ func (m *Machine) prepareFirstBoot() {
 	time.Sleep(time.Second)
 	input.WriteString("sync\n")
 	input.WriteString("poweroff\n")
+}
+
+func (machine *Machine) waitForVMState(vm *vz.VirtualMachine, state vz.VirtualMachineState) error {
+	for {
+		select {
+		case newState := <-vm.StateChangedNotify():
+			if newState == state {
+				utils.Logger.Infof("Machine %s reached state %v", machine.Name, state)
+				return nil
+			}
+		case <-time.After(5 * time.Second):
+			return fmt.Errorf("Machine %s failed to reached state %v after %v", machine.Name, state, TimeoutStart)
+		}
+	}
 }
 
 const cloudinit = `

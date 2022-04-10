@@ -3,7 +3,8 @@ module github.com/efortin/machina
 go 1.16
 
 require (
-	github.com/Code-Hex/vz v0.0.4
+	//github.com/Code-Hex/vz v0.0.4
+	github.com/Code-Hex/vz v0.0.5-0.20220406150231-a2ebc854a261
 	github.com/cavaliergopher/grab/v3 v3.0.1 // indirect
 	github.com/hpcloud/tail v1.0.0 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
@@ -17,4 +18,5 @@ require (
 	golang.org/x/sys v0.0.0-20211210111614-af8b64212486
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
+	inet.af/tcpproxy v0.0.0-20220326234310-be3ee21c9fa0 // indirect
 )

@@ -56,9 +56,16 @@ start the machine named ubuntu and override cpu with 2 cpu and 2 go of ram:
 		pid := mcmd.Process.Pid
 		utils.Logger.Debug("the current process a pid: ", pid)
 		mcmd.Process.Release()
+
+		if follow, err := cmd.Flags().GetBool("follow"); follow && err == nil {
+			machine.Log()
+		}
+
 	},
 }
 
 func init() {
 	RootCmd.AddCommand(StartCmd)
+	StartCmd.Flags().BoolP("follow", "f", false, "Log machine output after start")
+
 }

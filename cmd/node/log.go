@@ -5,9 +5,7 @@ Copyright © 2022 NAME HERE <EMAIL ADDRESS>
 package node
 
 import (
-	"fmt"
 	internal "github.com/efortin/machina/pkg"
-	"github.com/hpcloud/tail"
 	"github.com/spf13/cobra"
 )
 
@@ -17,11 +15,7 @@ var logCmd = &cobra.Command{
 	Short: "Display boot the machine boot log",
 	Long:  `Display boot the machine boot log, the output doesn't not contains ssh command !'`,
 	Run: func(cmd *cobra.Command, args []string) {
-		machine := internal.Machine{Name: args[0]}
-		t, _ := tail.TailFile(machine.OutputFilePath(), tail.Config{Follow: true})
-		for line := range t.Lines {
-			fmt.Println(line.Text)
-		}
+		log(args[0])
 	},
 	ValidArgs: internal.ListExistingMachines().List(),
 	Args:      cobra.ExactValidArgs(1),
@@ -29,5 +23,8 @@ var logCmd = &cobra.Command{
 
 func init() {
 	RootCmd.AddCommand(logCmd)
+}
 
+func log(machineName string) {
+	internal.Machine{Name: machineName}.Log()
 }

@@ -49,7 +49,7 @@ func GenerateAlmostUniqueMac(name string) string {
 }
 
 func GetVirtualMachineDirectory(vmName string) string {
-	return fmt.Sprintf("%s/%s", getWorkingDirectory(), vmName)
+	return fmt.Sprintf("%s/%s", GetWorkingDirectory(), vmName)
 }
 
 func readPidFromFile(filename string) (int, error) {
@@ -66,17 +66,6 @@ func readPidFromFile(filename string) (int, error) {
 	return pid, nil
 }
 
-func getWorkingDirectory() string {
-	user, err := user.Current()
-	if err != nil {
-		fmt.Errorf("%s", err)
-		os.Exit(1)
-	}
-	vmctldir := FromEnvWithDefault("VMCTLDIR", fmt.Sprint(user.HomeDir, "/.vm"))
-	utils.DirectoryCreateIfAbsent(vmctldir)
-	return vmctldir
-}
-
 func (release *UbuntuDistribution) ImageDirectory() string {
 	return fmt.Sprintf("%s/%s", baseImageDirectory(), release.ReleaseName)
 }
@@ -91,14 +80,14 @@ func (release *UbuntuDistribution) cloneIfNotExist(srcFilePath string, dstFilePa
 }
 
 func baseMachineDirectory() string {
-	baseMachineDirectory := fmt.Sprintf("%s/machines", getWorkingDirectory())
-	utils.DirectoryCreateIfAbsent(baseMachineDirectory)
+	baseMachineDirectory := fmt.Sprintf("%s/machines", GetWorkingDirectory())
+	DirectoryCreateIfAbsent(baseMachineDirectory)
 	return baseMachineDirectory
 }
 
 func baseImageDirectory() string {
-	imageDirectory := fmt.Sprintf("%s/images", getWorkingDirectory())
-	utils.DirectoryCreateIfAbsent(imageDirectory)
+	imageDirectory := fmt.Sprintf("%s/images", GetWorkingDirectory())
+	DirectoryCreateIfAbsent(imageDirectory)
 	return imageDirectory
 }
 
@@ -131,7 +120,7 @@ func FromFileSpec(name string) (*Machine, error) {
 // DownloadDistro will download a url to a local file. It's efficient because it will
 // write as it downloads and not load the whole file into memory.
 func (r *UbuntuDistribution) DownloadDistro() (err error) {
-	utils.DirectoryCreateIfAbsent(r.ImageDirectory())
+	DirectoryCreateIfAbsent(r.ImageDirectory())
 	err = r.downloadInitRd()
 	err = r.downloadKernel()
 	err = r.downloadImage()
@@ -223,4 +212,37 @@ func (release *UbuntuDistribution) downloadImage() (err error) {
 	cmd.Wait()
 
 	return
+}
+
+func DirectoryCreateIfAbsent(path string) (err error) {
+	_, err = os.Stat(path)
+	if err != nil {
+		err = os.Mkdir(path, os.ModePerm)
+		utils.Logger.Debug(path, "not exist, has been created")
+	}
+	return err
+}
+
+func GetWorkingDirectory() string {
+	user, err := user.Current()
+	if err != nil {
+		fmt.Errorf("%s", err)
+		os.Exit(1)
+	}
+	vmctldir := FromEnvWithDefault("VMCTLDIR", fmt.Sprint(user.HomeDir, "/.vm"))
+	DirectoryCreateIfAbsent(vmctldir)
+	return vmctldir
+}
+
+func TmpDirectory() string {
+	tmpdir := os.Getenv("TMPDIR")
+	if tmpdir == utils.Empty {
+		tmpDir := fmt.Sprintf("%s/%s", GetWorkingDirectory(), "/.tmp")
+		err := DirectoryCreateIfAbsent(tmpDir)
+		if err != nil {
+			utils.Logger.Errorf("Cannot create the fallback temporary dir %s", tmpDir)
+		}
+		return tmpDir
+	}
+	return tmpdir
 }
