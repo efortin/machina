@@ -56,6 +56,7 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
 
 		machine.Distribution.DownloadDistro()
 		machine.BaseDirectory()
+		machine.RootDirectory()
 		machine.ExportMachineSpecification()
 
 		ou, _ := os.Create(machine.BaseDirectory() + "/process.log")

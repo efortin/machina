@@ -213,6 +213,7 @@ func (m *Machine) RootDirectory() (path string, err error) {
 		utils.Logger.Info("Resizing disk", disk.Size(), "to", default_disk_size)
 		os.Truncate(path, default_disk_size)
 	}
+
 	return
 }
 
@@ -271,9 +272,6 @@ func (m *Machine) launch() {
 		utils.Logger.Errorf("Error during serial port attachment (file: %s): %v", m.OutputLogPath(), err)
 		os.Exit(1)
 	}
-	defer input.Close()
-	defer output.Close()
-	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, output)
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
 		consoleConfig,
@@ -364,7 +362,6 @@ func (m *Machine) waitTermination(vm *vz.VirtualMachine, signalCh chan os.Signal
 			} else {
 				utils.Logger.Info("The machine", m.Name, "was not stopped")
 			}
-			vm.Release()
 			m.cleanBeforeExit()
 			os.Exit(0)
 		}
@@ -483,18 +480,15 @@ func (m *Machine) launchPrimaryBoot() {
 	}
 	m.prepareFirstBoot()
 	m.ExportMachineSpecification()
-	vm.RequestStop()
 	err = m.waitForVMState(vm, vz.VirtualMachineStateStopped)
-	vm.Release()
-	input.Close()
 
 }
 
 func (m *Machine) prepareFirstBoot() {
 	input, err := os.OpenFile(m.inputLogPath(), os.O_WRONLY, 0666)
 	defer input.Close()
-	homedir, _ := os.UserHomeDir()
-	sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
+	//homedir, _ := os.UserHomeDir()
+	//sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
 	if err != nil {
 		utils.Logger.Fatal("No default ssh key found at /.ssh/id_rsa.pub")
 	}
@@ -502,13 +496,23 @@ func (m *Machine) prepareFirstBoot() {
 	_, err = input.WriteString("mkdir /mnt\n")
 	time.Sleep(time.Second)
 	input.WriteString("mount /dev/vda /mnt\r")
-	time.Sleep(time.Second)
+	time.Sleep(3 * time.Second)
 	input.WriteString("cat << EOF > /mnt/etc/cloud/cloud.cfg.d/99_user.cfg\r")
-	input.WriteString(fmt.Sprintf(cloudinit, sshkey))
+	input.WriteString(fmt.Sprintf(cloudinit, GetMachinaPublicKey()))
+	ioutil.WriteFile(m.BaseDirectory()+"/cloudinit", []byte(fmt.Sprintf(cloudinit, GetMachinaPublicKey())), 0755)
+	//input.WriteString(fmt.Sprintf(cloudinit, sshkey))
 	input.WriteString("\rEOF\r")
 	time.Sleep(time.Second)
+	input.WriteString("touch /mnt/forcefsck\n")
+	time.Sleep(time.Second)
+	input.WriteString("resize2fs /dev/vda\n")
+	time.Sleep(time.Second)
+	input.WriteString("umount /mnt\n")
+	time.Sleep(2 * time.Second)
 	input.WriteString("sync\n")
+	time.Sleep(time.Second)
 	input.WriteString("poweroff\n")
+
 }
 
 func (machine *Machine) waitForVMState(vm *vz.VirtualMachine, state vz.VirtualMachineState) error {
@@ -527,8 +531,7 @@ func (machine *Machine) waitForVMState(vm *vz.VirtualMachine, state vz.VirtualMa
 
 func connectToHost(user, host string) (*ssh.Client, *ssh.Session, error) {
 
-	home, _ := os.UserHomeDir()
-	pemBytes, err := ioutil.ReadFile(home + "/.ssh/id_rsa")
+	pemBytes, err := ioutil.ReadFile(getMachinaPrivateKeyPath())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -543,14 +546,19 @@ func connectToHost(user, host string) (*ssh.Client, *ssh.Session, error) {
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
 	}
 
 	sshConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+
+	utils.Logger.Infof("Trying to connect to %s", host)
 
 	client, err := ssh.Dial("tcp", host, sshConfig)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	utils.Logger.Infof("Trying to connect to %s", host)
 
 	session, err := client.NewSession()
 	if err != nil {
@@ -569,11 +577,11 @@ users:
   - name: root
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
     lock_passwd: false
-    hashed_passwd: $1$SaltSalt$YhgRYajLPrYevs14poKBQ0
     ssh-authorized-keys: 
       - %s
-runcmd:
-    - [ cp, /usr/bin/true, /usr/sbin/flash-kernel ]
-    - [ apt, remove, --purge, irqbalance, -y ]
 
+runcmd:
+- [ cp, /usr/bin/true, /usr/sbin/flash-kernel ]
+- [ apt, remove, --purge, irqbalance, -y ]
+- [ reboot ]
 `

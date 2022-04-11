@@ -3,11 +3,16 @@ package internal
 import (
 	"compress/gzip"
 	"crypto/md5"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"github.com/cavaliergopher/grab/v3"
 	"github.com/efortin/machina/utils"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
 	"io"
 	"io/ioutil"
@@ -245,4 +250,47 @@ func TmpDirectory() string {
 		return tmpDir
 	}
 	return tmpdir
+}
+
+func GetMachinaPublicKey() string {
+	bytes, err := ioutil.ReadFile(getMachinaPublicKeyPath())
+	if err != nil {
+		utils.Logger.Errorf("Error reading public key: %s", getMachinaPublicKeyPath())
+		os.Exit(1)
+	}
+	return string(bytes)
+}
+
+func getMachinaPrivateKeyPath() string {
+	return fmt.Sprintf("%s/machina", GetWorkingDirectory())
+}
+
+func getMachinaPublicKeyPath() string {
+	return fmt.Sprintf("%s/machina.pub", GetWorkingDirectory())
+}
+
+func GenerateMachinaKeypair() error {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		return err
+	}
+
+	// generate and write private key as PEM
+	privateKeyFile, err := os.Create(getMachinaPrivateKeyPath())
+	defer privateKeyFile.Close()
+	if err != nil {
+		return err
+	}
+	privateKeyPEM := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}
+	if err := pem.Encode(privateKeyFile, privateKeyPEM); err != nil {
+		return err
+	}
+
+	// generate and write public key
+	pub, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(getMachinaPublicKeyPath(), ssh.MarshalAuthorizedKey(pub), 0655)
 }
