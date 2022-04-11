@@ -580,8 +580,16 @@ users:
     ssh-authorized-keys: 
       - %s
 
+power_state:
+    delay: now
+    mode: reboot
+    message: Rebooting machine
+	condition: true
+
 runcmd:
 - [ cp, /usr/bin/true, /usr/sbin/flash-kernel ]
 - [ apt, remove, --purge, irqbalance, -y ]
-- [ reboot ]
+
+
+
 `
