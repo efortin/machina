@@ -68,10 +68,7 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
 		mcmd.Stdout = ou
 		mcmd.Dir = cwd
 		_ = mcmd.Start()
-		pid := mcmd.Process.Pid
-		utils.Logger.Debug("the current process a pid: ", pid)
 		mcmd.Process.Release()
-		_ = os.WriteFile(machine.PidFilePath(), []byte(strconv.Itoa(pid)), 0600)
 
 	},
 }

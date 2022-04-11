@@ -8,6 +8,7 @@ import (
 	"github.com/efortin/machina/utils"
 	"github.com/hpcloud/tail"
 	"github.com/mitchellh/go-ps"
+	"golang.org/x/crypto/ssh"
 	"io/ioutil"
 	"log"
 	"net"
@@ -114,26 +115,42 @@ func (d *Machine) findVfkitProcess() (ps.Process, string, error) {
 
 // Stop stops a host forcefully
 func (d *Machine) Stop() {
-	d.sendSignal(syscall.SIGTERM)
+
+	ip, err := d.IpAddress()
+	if err == nil {
+		client, session, err := connectToHost("root", ip+":22")
+		// Could not connect
+		if err != nil {
+			d.sendSignal()
+			return
+		}
+		session.Run("poweroff")
+		session.Close()
+		client.Close()
+		utils.Logger.Info("Sleeping")
+	}
+	time.Sleep(10 * time.Second)
+	d.sendSignal()
+
 }
 
 func (m *Machine) cleanBeforeExit() {
 	os.Remove(m.PidFilePath())
 }
 
-func (m *Machine) sendSignal(s os.Signal) error {
+func (m *Machine) sendSignal() {
 	psProc, machinestate, err := m.findVfkitProcess()
 	if machinestate != Machine_state_running {
-		return nil
+		return
 	}
 	utils.Logger.Info("try to kill", psProc.Pid())
 	proc, err := os.FindProcess(psProc.Pid())
 	if err == nil {
-		return proc.Signal(s)
+		proc.Signal(syscall.SIGTERM)
 	} else {
 		utils.Logger.Info("Error during kill", err)
 	}
-	return nil
+	return
 }
 
 // IpAddress Return VM ip address if already available
@@ -254,6 +271,9 @@ func (m *Machine) launch() {
 		utils.Logger.Errorf("Error during serial port attachment (file: %s): %v", m.OutputLogPath(), err)
 		os.Exit(1)
 	}
+	defer input.Close()
+	defer output.Close()
+	serialPortAttachment := vz.NewFileHandleSerialPortAttachment(input, output)
 	consoleConfig := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialPortAttachment)
 	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{
 		consoleConfig,
@@ -503,6 +523,42 @@ func (machine *Machine) waitForVMState(vm *vz.VirtualMachine, state vz.VirtualMa
 			return fmt.Errorf("Machine %s failed to reached state %v after %v", machine.Name, state, TimeoutStart)
 		}
 	}
+}
+
+func connectToHost(user, host string) (*ssh.Client, *ssh.Session, error) {
+
+	home, _ := os.UserHomeDir()
+	pemBytes, err := ioutil.ReadFile(home + "/.ssh/id_rsa")
+	if err != nil {
+		log.Fatal(err)
+	}
+	signer, err := ssh.ParsePrivateKey(pemBytes)
+	if err != nil {
+		log.Fatalf("parse key failed:%v", err)
+	}
+
+	sshConfig := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	sshConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+
+	client, err := ssh.Dial("tcp", host, sshConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	session, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		return nil, nil, err
+	}
+
+	return client, session, nil
 }
 
 const cloudinit = `
