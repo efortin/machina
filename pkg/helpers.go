@@ -252,13 +252,13 @@ func TmpDirectory() string {
 	return tmpdir
 }
 
-func GetMachinaPublicKey() string {
+func GetMachinaPublicKey() (string, error) {
 	bytes, err := ioutil.ReadFile(getMachinaPublicKeyPath())
 	if err != nil {
 		utils.Logger.Errorf("Error reading public key: %s", getMachinaPublicKeyPath())
-		os.Exit(1)
+		return utils.Empty, err
 	}
-	return string(bytes)
+	return string(bytes), nil
 }
 
 func getMachinaPrivateKeyPath() string {
@@ -276,7 +276,7 @@ func GenerateMachinaKeypair() error {
 	}
 
 	// generate and write private key as PEM
-	privateKeyFile, err := os.Create(getMachinaPrivateKeyPath())
+	privateKeyFile, err := os.OpenFile(getMachinaPrivateKeyPath(), os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0600)
 	defer privateKeyFile.Close()
 	if err != nil {
 		return err

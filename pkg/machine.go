@@ -8,7 +8,9 @@ import (
 	"github.com/efortin/machina/utils"
 	"github.com/hpcloud/tail"
 	"github.com/mitchellh/go-ps"
+	"github.com/pkg/term/termios"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sys/unix"
 	"io/ioutil"
 	"log"
 	"net"
@@ -395,6 +397,8 @@ func (m *Machine) launchPrimaryBoot() {
 		default_mem_size,
 	)
 
+	os.Remove(m.inputLogPath())
+	os.Remove(m.OutputLogPath())
 	input, err := os.OpenFile(m.inputLogPath(), os.O_RDONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		utils.Logger.Error("Error during openning %s file: %v", m.inputLogPath(), err)
@@ -485,33 +489,51 @@ func (m *Machine) launchPrimaryBoot() {
 }
 
 func (m *Machine) prepareFirstBoot() {
-	input, err := os.OpenFile(m.inputLogPath(), os.O_WRONLY, 0666)
+	input, err := os.OpenFile(m.inputLogPath(), os.O_WRONLY|os.O_TRUNC, 0666)
 	defer input.Close()
 	//homedir, _ := os.UserHomeDir()
 	//sshkey, err := os.ReadFile(fmt.Sprint(homedir, "/.ssh/id_rsa.pub"))
+	key, err := GetMachinaPublicKey()
 	if err != nil {
-		utils.Logger.Fatal("No default ssh key found at /.ssh/id_rsa.pub")
+		utils.Logger.Fatal("No machina ssh key found, please use `machina init`")
+		os.Exit(1)
 	}
-	time.Sleep(5 * time.Second)
-	_, err = input.WriteString("mkdir /mnt\n")
-	time.Sleep(time.Second)
-	input.WriteString("mount /dev/vda /mnt\r")
-	time.Sleep(3 * time.Second)
-	input.WriteString("cat << EOF > /mnt/etc/cloud/cloud.cfg.d/99_user.cfg\r")
-	input.WriteString(fmt.Sprintf(cloudinit, GetMachinaPublicKey()))
-	ioutil.WriteFile(m.BaseDirectory()+"/cloudinit", []byte(fmt.Sprintf(cloudinit, GetMachinaPublicKey())), 0755)
-	//input.WriteString(fmt.Sprintf(cloudinit, sshkey))
-	input.WriteString("\rEOF\r")
-	time.Sleep(time.Second)
-	input.WriteString("touch /mnt/forcefsck\n")
-	time.Sleep(time.Second)
-	input.WriteString("resize2fs /dev/vda\n")
-	time.Sleep(time.Second)
-	input.WriteString("umount /mnt\n")
-	time.Sleep(2 * time.Second)
-	input.WriteString("sync\n")
-	time.Sleep(time.Second)
-	input.WriteString("poweroff\n")
+
+	cloudinitContent := fmt.Sprintf(cloudinit, key)
+
+	type Expect struct {
+		expect  string
+		command string
+	}
+
+	expectations := []Expect{
+		{"Enter 'help' for a list of built-in commands.", utils.Empty},
+		{"(initramfs)", "mkdir /mnt"},
+		{"(initramfs)", "mount /dev/vda /mnt"},
+		{"(initramfs)", "cat << EOF > /mnt/etc/cloud/cloud.cfg.d/99_user.cfg\r" + cloudinitContent + "\rEOF"},
+		{"(initramfs)", "poweroff"},
+	}
+
+	t, err := tail.TailFile(m.OutputLogPath(), tail.Config{Follow: true})
+	expectIndex := 0
+	skipNextLine := false
+	for line := range t.Lines {
+		if expectIndex == len(expectations) {
+			t.Stop()
+		}
+		if skipNextLine {
+			skipNextLine = false
+		} else {
+			utils.Logger.Debug("\t" + line.Text)
+
+			if strings.Contains(line.Text, expectations[expectIndex].expect) {
+				skipNextLine = true
+				input.WriteString(expectations[expectIndex].command + "\r\n")
+				expectIndex++
+			}
+		}
+
+	}
 
 }
 
@@ -523,7 +545,7 @@ func (machine *Machine) waitForVMState(vm *vz.VirtualMachine, state vz.VirtualMa
 				utils.Logger.Infof("Machine %s reached state %v", machine.Name, state)
 				return nil
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(15 * time.Second):
 			return fmt.Errorf("Machine %s failed to reached state %v after %v", machine.Name, state, TimeoutStart)
 		}
 	}
@@ -593,3 +615,24 @@ runcmd:
 
 
 `
+
+func setRawMode(f *os.File) {
+	var attr unix.Termios
+
+	// Get settings for terminal
+	termios.Tcgetattr(f.Fd(), &attr)
+
+	// Put stdin into raw mode, disabling local echo, input canonicalization,
+	// and CR-NL mapping.
+	attr.Iflag &^= syscall.ICRNL
+	attr.Lflag &^= syscall.ICANON | syscall.ECHO
+
+	// Set minimum characters when reading = 1 char
+	attr.Cc[syscall.VMIN] = 1
+
+	// set timeout when reading as non-canonical mode
+	attr.Cc[syscall.VTIME] = 0
+
+	// reflects the changed settings
+	termios.Tcsetattr(f.Fd(), termios.TCSANOW, &attr)
+}
