@@ -313,13 +313,13 @@ func (m *Machine) launch() {
 	})
 
 	// traditional memory balloon device which allows for managing guest memory. (optional)
-	config.SetMemoryBalloonDevicesVirtualMachineConfiguration([]vz.MemoryBalloonDeviceConfiguration{
+	/*config.SetMemoryBalloonDevicesVirtualMachineConfiguration([]vz.MemoryBalloonDeviceConfiguration{
 		vz.NewVirtioTraditionalMemoryBalloonDeviceConfiguration(),
-	})
+	})*/
 
-	config.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{
-		vz.NewVirtioSocketDeviceConfiguration(),
-	})
+	//config.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{
+	//	vz.NewVirtioSocketDeviceConfiguration(),
+	//})
 	validated, err := config.Validate()
 	if !validated || err != nil {
 		log.Fatal("validation failed", err)

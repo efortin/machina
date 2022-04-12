@@ -16,7 +16,7 @@ var LaunchCmd = &cobra.Command{
 	Use:   "launch",
 	Short: "Launch a machine using Apple Virtualization Framework",
 	Long: `Launch a machine using Apple Virtualization Framework.
-For the moment, only Ubuntu 20.04 is supported but we'll try to add support
+For the moment, only Ubuntu 20.04 ( focal) and 22.04 ( jammy) is supported but we'll try to add support
 for Centos and debian soon.
 For example:
 
@@ -42,10 +42,15 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
 			ram = internal.Default_mem_mb
 		}
 
+		release, err := cmd.Flags().GetString("release")
+		if err != nil {
+			utils.Logger.Errorf("Invalid release name %s", release)
+			os.Exit(1)
+		}
 		machine := &internal.Machine{
 			Name: cmd.Flag("name").Value.String(),
 			Distribution: &internal.UbuntuDistribution{
-				ReleaseName:  "jammy",
+				ReleaseName:  release,
 				Architecture: "arm64",
 			},
 			Spec: internal.MachineSpec{
@@ -77,6 +82,7 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
 func init() {
 	RootCmd.AddCommand(LaunchCmd)
 	LaunchCmd.Flags().StringP("name", "n", "primary", "Unique machine name")
+	LaunchCmd.Flags().StringP("release", "r", "focal", "Ubuntu distribution")
 	LaunchCmd.Flags().IntP("memory", "m", 2048, "Ram / Memory in MB")
 	LaunchCmd.Flags().IntP("cpu", "c", 2, "Cpu/core to allocate")
 
