@@ -45,7 +45,7 @@ Launch a machine named ubuntu with 2 cpu and 2 go of ram:
 		machine := &internal.Machine{
 			Name: cmd.Flag("name").Value.String(),
 			Distribution: &internal.UbuntuDistribution{
-				ReleaseName:  "focal",
+				ReleaseName:  "jammy",
 				Architecture: "arm64",
 			},
 			Spec: internal.MachineSpec{

@@ -118,8 +118,8 @@ func (d *Machine) findVfkitProcess() (ps.Process, string, error) {
 // Stop stops a host forcefully
 func (d *Machine) Stop() {
 
-	ip, err := d.IpAddress()
-	if err == nil {
+	//ip, err := d.IpAddress()
+	/*if err == nil {
 		client, session, err := connectToHost("root", ip+":22")
 		// Could not connect
 		if err != nil {
@@ -131,7 +131,7 @@ func (d *Machine) Stop() {
 		client.Close()
 		utils.Logger.Info("Sleeping")
 	}
-	time.Sleep(10 * time.Second)
+	time.Sleep(10 * time.Second)*/
 	d.sendSignal()
 
 }

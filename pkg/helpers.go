@@ -210,7 +210,7 @@ func (release *UbuntuDistribution) downloadImage() (err error) {
 	_, err = grab.Get(release.ImageDirectory(), fmt.Sprintf("https://cloud-images.ubuntu.com/%s/current/%s-server-cloudimg-%s.tar.gz", release.ReleaseName, release.ReleaseName, release.Architecture))
 
 	fmt.Println(err)
-	cmd := exec.Command("/usr/bin/tar", "xf", release.ImageDirectory()+"/focal-server-cloudimg-arm64.tar.gz")
+	cmd := exec.Command("/usr/bin/tar", "xf", release.ImageDirectory()+"/"+release.ReleaseName+"-server-cloudimg-arm64.tar.gz")
 	cmd.Dir = release.ImageDirectory() + "/"
 	utils.Logger.Info("cmd directory", cmd.Dir)
 	err = cmd.Run()
