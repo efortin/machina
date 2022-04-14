@@ -148,7 +148,7 @@ func (m *Machine) sendSignal() {
 	utils.Logger.Info("try to kill", psProc.Pid())
 	proc, err := os.FindProcess(psProc.Pid())
 	if err == nil {
-		proc.Signal(syscall.SIGTERM)
+		proc.Kill()
 	} else {
 		utils.Logger.Info("Error during kill", err)
 	}
